@@ -1,0 +1,14 @@
+{
+  "is_placeholder": true,
+  "generated_at": "2026-04-10T00:00:00Z",
+  "cohort_note": "Replace by running: python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle (requires OPENAI_API_KEY and a built cohort TSV).",
+  "n_npis": 0,
+  "n_questions": 6,
+  "n_methods": 2,
+  "model": "not_run",
+  "total_api_calls": 0,
+  "total_cost_usd": null,
+  "method_comparison": {},
+  "adoption_by_archetype_actual": {},
+  "sample_personas": []
+}

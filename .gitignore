@@ -21,3 +21,4 @@ data/output/sample_pharma_sales_npis_dry_run.tsv
 data/output/sample_pharma_sales_report_dry_run.txt
 data/output/tirzepatide_simulation_cohort_100.tsv
 data/output/tirzepatide_simulation_cohort_report.txt
+data/output/runs/

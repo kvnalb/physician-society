@@ -1,0 +1,8 @@
+{
+  "error": "no_responses_file",
+  "survey": {
+    "method_agreement_kappa_mean": null,
+    "per_question": {},
+    "stability": "No responses.jsonl found; run simulation.run_batch with an API key."
+  }
+}

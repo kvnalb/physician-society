@@ -3,7 +3,7 @@ VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 VENV_PIP := $(VENV_DIR)/bin/pip
 
-.PHONY: venv install setup run-select-org run-group-locations run-sample-pharma run-sample-pharma-dry run-tirzepatide-cohort run-tirzepatide-cohort-dry docker-build docker-run clean-venv
+.PHONY: venv install setup run-select-org run-group-locations run-sample-pharma run-sample-pharma-dry run-tirzepatide-cohort run-tirzepatide-cohort-dry demo eval smoke-batch docker-build docker-run clean-venv
 
 venv:
 	$(PYTHON) -m venv $(VENV_DIR)
@@ -31,6 +31,15 @@ run-tirzepatide-cohort:
 
 run-tirzepatide-cohort-dry:
 	$(VENV_PYTHON) -u scripts/06_tirzepatide_simulation_cohort.py --dry-run
+
+demo:
+	$(VENV_PYTHON) -m streamlit run streamlit_app.py
+
+eval:
+	$(VENV_PYTHON) -m eval.run_eval
+
+smoke-batch:
+	$(VENV_PYTHON) -m simulation.run_batch --limit-npis 5
 
 docker-build:
 	docker build -t physician-society:latest .
