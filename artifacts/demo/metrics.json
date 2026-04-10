@@ -1,8 +1,108 @@
 {
-  "error": "no_responses_file",
   "survey": {
-    "method_agreement_kappa_mean": null,
-    "per_question": {},
-    "stability": "No responses.jsonl found; run simulation.run_batch with an API key."
+    "method_agreement_kappa_mean": -0.2580630585701082,
+    "per_question": {
+      "q1_second_line_agent": {
+        "n_paired": 10,
+        "method_a_dist": {
+          "q1_insulin": 2,
+          "q1_dpp4": 3,
+          "q1_sglt2": 2,
+          "q1_glp1": 1,
+          "q1_other": 2
+        },
+        "method_b_dist": {
+          "q1_other": 2,
+          "q1_su": 3,
+          "q1_dpp4": 2,
+          "q1_sglt2": 1,
+          "q1_glp1": 2
+        },
+        "cohen_kappa": -0.16279069767441867
+      },
+      "q2_glp1_panel_share": {
+        "n_paired": 10,
+        "method_a_dist": {
+          "q2_30_50": 3,
+          "q2_lt5": 2,
+          "q2_5_15": 3,
+          "q2_50p": 1,
+          "q2_15_30": 1
+        },
+        "method_b_dist": {
+          "q2_50p": 3,
+          "q2_5_15": 2,
+          "q2_15_30": 3,
+          "q2_lt5": 1,
+          "q2_30_50": 1
+        },
+        "cohen_kappa": -0.20481927710843362
+      },
+      "q3_tirzepatide_prescribed": {
+        "n_paired": 10,
+        "method_a_dist": {
+          "q3_yes": 4,
+          "q3_no_not_yet": 4,
+          "q3_no_unlikely": 1,
+          "q3_unsure": 1
+        },
+        "method_b_dist": {
+          "q3_no_not_yet": 4,
+          "q3_no_unlikely": 4,
+          "q3_unsure": 1,
+          "q3_yes": 1
+        },
+        "cohen_kappa": -0.33333333333333326
+      },
+      "q4_tirzepatide_adoption_speed": {
+        "n_paired": 10,
+        "method_a_dist": {
+          "q4_early": 6,
+          "q4_mainstream": 2,
+          "q4_late": 1,
+          "q4_na": 1
+        },
+        "method_b_dist": {
+          "q4_mainstream": 6,
+          "q4_late": 2,
+          "q4_na": 1,
+          "q4_early": 1
+        },
+        "cohen_kappa": -0.26582278481012667
+      },
+      "q5_branded_vs_generic": {
+        "n_paired": 10,
+        "method_a_dist": {
+          "q5_no_pref": 5,
+          "q5_prefer_generic": 1,
+          "q5_case_by_case": 2,
+          "q5_prefer_branded": 2
+        },
+        "method_b_dist": {
+          "q5_case_by_case": 5,
+          "q5_no_pref": 1,
+          "q5_prefer_branded": 2,
+          "q5_prefer_generic": 2
+        },
+        "cohen_kappa": -0.26582278481012644
+      },
+      "q6_diabetes_drug_count": {
+        "n_paired": 10,
+        "method_a_dist": {
+          "q6_1_5": 3,
+          "q6_11_20": 3,
+          "q6_20p": 3,
+          "q6_6_10": 1
+        },
+        "method_b_dist": {
+          "q6_6_10": 3,
+          "q6_20p": 3,
+          "q6_1_5": 3,
+          "q6_11_20": 1
+        },
+        "cohen_kappa": -0.3157894736842104
+      }
+    },
+    "stability": "Methods A and B show weak agreement (low Cohen's kappa on average)."
   }
 }

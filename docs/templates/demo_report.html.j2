@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tirzepatide adoption simulation — demo report</title>
+  <style>
+    :root { --fg: #1a1a1a; --muted: #555; --accent: #2E5077; --bg: #fafafa; --card: #fff; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; color: var(--fg); background: var(--bg); line-height: 1.5; }
+    header { background: var(--card); border-bottom: 1px solid #e0e0e0; padding: 1.25rem 2rem; }
+    header h1 { margin: 0 0 0.25rem; font-size: 1.35rem; }
+    header p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+    main { max-width: 52rem; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .metric { background: var(--card); border: 1px solid #e8e8e8; border-radius: 8px; padding: 1rem; }
+    .metric .label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+    .metric .value { font-size: 1.4rem; font-weight: 600; color: var(--accent); margin-top: 0.25rem; }
+    article.narrative { background: var(--card); border: 1px solid #e8e8e8; border-radius: 8px; padding: 1.25rem 1.5rem; }
+    article.narrative pre { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.82rem; margin: 0; color: #333; }
+    footer { text-align: center; font-size: 0.8rem; color: var(--muted); padding: 2rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Tirzepatide adoption simulation</h1>
+    <p>Offline bundle snapshot + target narrative (Medicare Part D–scoped demo)</p>
+  </header>
+  <main>
+    <section class="metrics" aria-label="Demo metrics">
+      <div class="metric">
+        <div class="label">NPIs in summary</div>
+        <div class="value">{{ summary.get('n_npis', '—') }}</div>
+      </div>
+      <div class="metric">
+        <div class="label">Survey questions</div>
+        <div class="value">{{ summary.get('n_questions', '—') }}</div>
+      </div>
+      <div class="metric">
+        <div class="label">Mean κ (A vs B)</div>
+        <div class="value">
+          {% set kap = metrics.get('survey', {}).get('method_agreement_kappa_mean') %}
+          {% if kap is not none %}
+            {{ "%.3f"|format(kap) }}
+          {% else %}
+            —
+          {% endif %}
+        </div>
+      </div>
+      <div class="metric">
+        <div class="label">Model</div>
+        <div class="value" style="font-size:1rem">{{ summary.get('model', '—') }}</div>
+      </div>
+    </section>
+    {% set stab = metrics.get('survey', {}).get('stability') %}
+    {% if stab %}
+    <p><strong>Stability:</strong> {{ stab }}</p>
+    {% endif %}
+    <h2>Target report (markdown source)</h2>
+    <article class="narrative">
+      <pre>{{ narrative }}</pre>
+    </article>
+  </main>
+  <footer>Generated for local review; open <code>docs/target_report.md</code> in the repo for editing.</footer>
+</body>
+</html>

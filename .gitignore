@@ -1,6 +1,5 @@
 data/raw/
 data/processed/
-archive/
 *.csv
 *.xlsx
 .env
@@ -10,7 +9,7 @@ __pycache__/
 .DS_Store
 notebooks/
 
-# Large regenerated location aggregates (run scripts/02_group_npis_by_practice_location.py)
+# Large regenerated location aggregates (see archive/legacy/scripts/02_group_npis_by_practice_location.py)
 data/output/npi_practice_location.tsv
 data/output/practice_location_npi_counts.tsv
 
@@ -22,3 +21,11 @@ data/output/sample_pharma_sales_report_dry_run.txt
 data/output/tirzepatide_simulation_cohort_100.tsv
 data/output/tirzepatide_simulation_cohort_report.txt
 data/output/runs/
+
+# Local run logs and regenerated schema probe (legacy script writes schema_report to data/output)
+data/output/*.log
+data/output/schema_report.txt
+
+# Generated static report (run: make report-html)
+docs/build/
+archive/data/

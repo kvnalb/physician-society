@@ -26,7 +26,7 @@ except ModuleNotFoundError as exc:
     ) from exc
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "output"
 FIGURES_DIR = OUTPUT_DIR / "figures"

@@ -21,6 +21,87 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_COHORT = PROJECT_ROOT / "data" / "output" / "tirzepatide_simulation_cohort_100.tsv"
 
 
+def _synthetic_response_rows(
+    cohort_df: pd.DataFrame,
+    questions: List[Question],
+    *,
+    model: str,
+    temperature: float,
+) -> List[dict[str, Any]]:
+    """Deterministic A/B rows for CI or environments without an API key (not real LLM output)."""
+    rows: List[dict[str, Any]] = []
+    for _, row in cohort_df.iterrows():
+        npi = str(row.get("npi", ""))
+        for q in questions:
+            n_opt = len(q.options)
+            if n_opt == 0:
+                continue
+            h = int(hashlib.md5(f"{npi}|{q.question_id}".encode()).hexdigest(), 16)
+            ia = h % n_opt
+            ib = (h + 1) % n_opt
+            opt_a = q.options[ia].option_id
+            opt_b = q.options[ib].option_id
+            for letter, parsed in [("a", opt_a), ("b", opt_b)]:
+                rows.append(
+                    {
+                        "npi": npi,
+                        "question_id": q.question_id,
+                        "method": f"method_{letter}",
+                        "model": model,
+                        "temperature": temperature,
+                        "raw": "",
+                        "parsed_option": parsed,
+                        "reasoning": "Offline deterministic seed (no LLM call).",
+                        "latency_ms": 0,
+                        "error": None,
+                        "cache_hit": False,
+                        "offline_seed": True,
+                    }
+                )
+    return rows
+
+
+def run_offline_seed_demo(
+    *,
+    cohort_path: Path,
+    output_dir: Path,
+    limit_npis: Optional[int],
+) -> int:
+    questions = load_questions()
+    if not cohort_path.is_file():
+        print(f"Cohort not found: {cohort_path}")
+        return 1
+    df = pd.read_csv(cohort_path, sep="\t", low_memory=False)
+    if limit_npis is not None:
+        df = df.head(limit_npis)
+    if df.empty:
+        print("Cohort is empty.")
+        return 1
+    model = "offline_seed"
+    temperature = 0.0
+    rows_out = _synthetic_response_rows(df, questions, model=model, temperature=temperature)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_path = output_dir / "responses.jsonl"
+    with open(jsonl_path, "w", encoding="utf-8") as fh:
+        for r in rows_out:
+            fh.write(json.dumps(r) + "\n")
+    print(f"Wrote {jsonl_path.relative_to(PROJECT_ROOT)} (offline seed, n={len(rows_out)} rows).")
+    _write_demo_bundle(
+        rows_out=rows_out,
+        cohort_df=df,
+        questions=questions,
+        methods=["A", "B"],
+        model=model,
+    )
+    demo_summary_path = PROJECT_ROOT / "artifacts" / "demo" / "summary.json"
+    data = json.loads(demo_summary_path.read_text(encoding="utf-8"))
+    data["is_placeholder"] = False
+    data["offline_seed"] = True
+    demo_summary_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    print("Updated artifacts/demo/summary.json (offline seed, not real LLM output).")
+    return 0
+
+
 def _cache_key(
     *,
     model: str,
@@ -306,7 +387,21 @@ def main() -> None:
         action="store_true",
         help="Write artifacts/demo/summary.json and sample_responses.jsonl",
     )
+    p.add_argument(
+        "--offline-seed-demo",
+        action="store_true",
+        help="No API: deterministic A/B responses from cohort + questions (for CI / missing keys)",
+    )
     args = p.parse_args()
+
+    if args.offline_seed_demo:
+        raise SystemExit(
+            run_offline_seed_demo(
+                cohort_path=args.cohort_path,
+                output_dir=args.output_dir,
+                limit_npis=args.limit_npis,
+            )
+        )
 
     methods = ["A", "B"] if args.method == "both" else [args.method]
     key = get_api_key("openai")

@@ -13,8 +13,7 @@ claims data, validated against actual prescribing behavior.
 - Commit messages: short, descriptive imperative or sentence-style titles
   (e.g. "Require Part D 2023 rows in tirzepatide cohort script"); no "phase X.Y" prefix
 - Never commit data/raw/ or data/processed/ (gitignored)
-- Always commit data/output/ files (personas, ground truth — these 
-  are small JSONs that define the experiment)
+- Commit small, curated outputs under `artifacts/demo/` (summary, metrics, sample JSONL) when they define the demo experiment. Large regenerated files under `data/output/` stay gitignored unless explicitly whitelisted.
 - Commit scripts BEFORE running them, then commit results AFTER 
   reviewing output
 - If a script changes, commit the change before re-running

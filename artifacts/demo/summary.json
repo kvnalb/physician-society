@@ -1,14 +1,212 @@
 {
-  "is_placeholder": true,
-  "generated_at": "2026-04-10T00:00:00Z",
-  "cohort_note": "Replace by running: python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle (requires OPENAI_API_KEY and a built cohort TSV).",
-  "n_npis": 0,
+  "generated_at": "2026-04-10T23:18:18Z",
+  "cohort_note": "Regenerate after tirzepatide_simulation_cohort_100.tsv is updated.",
+  "n_npis": 10,
   "n_questions": 6,
   "n_methods": 2,
-  "model": "not_run",
-  "total_api_calls": 0,
+  "model": "offline_seed",
+  "total_api_calls": 120,
   "total_cost_usd": null,
-  "method_comparison": {},
-  "adoption_by_archetype_actual": {},
-  "sample_personas": []
+  "method_comparison": {
+    "q1_second_line_agent": {
+      "method_a_distribution": {
+        "q1_insulin": 2,
+        "q1_dpp4": 3,
+        "q1_sglt2": 2,
+        "q1_glp1": 1,
+        "q1_other": 2
+      },
+      "method_b_distribution": {
+        "q1_other": 2,
+        "q1_su": 3,
+        "q1_dpp4": 2,
+        "q1_sglt2": 1,
+        "q1_glp1": 2
+      }
+    },
+    "q2_glp1_panel_share": {
+      "method_a_distribution": {
+        "q2_30_50": 3,
+        "q2_lt5": 2,
+        "q2_5_15": 3,
+        "q2_50p": 1,
+        "q2_15_30": 1
+      },
+      "method_b_distribution": {
+        "q2_50p": 3,
+        "q2_5_15": 2,
+        "q2_15_30": 3,
+        "q2_lt5": 1,
+        "q2_30_50": 1
+      }
+    },
+    "q3_tirzepatide_prescribed": {
+      "method_a_distribution": {
+        "q3_yes": 4,
+        "q3_no_not_yet": 4,
+        "q3_no_unlikely": 1,
+        "q3_unsure": 1
+      },
+      "method_b_distribution": {
+        "q3_no_not_yet": 4,
+        "q3_no_unlikely": 4,
+        "q3_unsure": 1,
+        "q3_yes": 1
+      }
+    },
+    "q4_tirzepatide_adoption_speed": {
+      "method_a_distribution": {
+        "q4_early": 6,
+        "q4_mainstream": 2,
+        "q4_late": 1,
+        "q4_na": 1
+      },
+      "method_b_distribution": {
+        "q4_mainstream": 6,
+        "q4_late": 2,
+        "q4_na": 1,
+        "q4_early": 1
+      }
+    },
+    "q5_branded_vs_generic": {
+      "method_a_distribution": {
+        "q5_no_pref": 5,
+        "q5_prefer_generic": 1,
+        "q5_case_by_case": 2,
+        "q5_prefer_branded": 2
+      },
+      "method_b_distribution": {
+        "q5_case_by_case": 5,
+        "q5_no_pref": 1,
+        "q5_prefer_branded": 2,
+        "q5_prefer_generic": 2
+      }
+    },
+    "q6_diabetes_drug_count": {
+      "method_a_distribution": {
+        "q6_1_5": 3,
+        "q6_11_20": 3,
+        "q6_20p": 3,
+        "q6_6_10": 1
+      },
+      "method_b_distribution": {
+        "q6_6_10": 3,
+        "q6_20p": 3,
+        "q6_1_5": 3,
+        "q6_11_20": 1
+      }
+    }
+  },
+  "adoption_by_archetype_actual": {
+    "Conservative_PCP": {
+      "rate": 0.0,
+      "n": 6
+    },
+    "Early_Adopter_Specialist": {
+      "rate": 1.0,
+      "n": 1
+    },
+    "Laggard": {
+      "rate": 0.0,
+      "n": 2
+    },
+    "Mainstream_Specialist": {
+      "rate": 0.0,
+      "n": 1
+    }
+  },
+  "sample_personas": [
+    {
+      "npi": "1760788293",
+      "specialty": "Family Medicine",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Conservative_PCP",
+      "q1_response_method_a": "q1_insulin",
+      "q1_response_method_b": "q1_other"
+    },
+    {
+      "npi": "1831456474",
+      "specialty": "Family Medicine",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Conservative_PCP",
+      "q1_response_method_a": "q1_dpp4",
+      "q1_response_method_b": "q1_su"
+    },
+    {
+      "npi": "1922045939",
+      "specialty": "Internal Medicine",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Conservative_PCP",
+      "q1_response_method_a": "q1_dpp4",
+      "q1_response_method_b": "q1_su"
+    },
+    {
+      "npi": "1760986889",
+      "specialty": "Family Medicine",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Conservative_PCP",
+      "q1_response_method_a": "q1_sglt2",
+      "q1_response_method_b": "q1_dpp4"
+    },
+    {
+      "npi": "1205196987",
+      "specialty": "Internal Medicine",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Conservative_PCP",
+      "q1_response_method_a": "q1_sglt2",
+      "q1_response_method_b": "q1_dpp4"
+    },
+    {
+      "npi": "1003153214",
+      "specialty": "Internal Medicine",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Conservative_PCP",
+      "q1_response_method_a": "q1_glp1",
+      "q1_response_method_b": "q1_sglt2"
+    },
+    {
+      "npi": "1558340034",
+      "specialty": "Internal Medicine",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Early_Adopter_Specialist",
+      "q1_response_method_a": "q1_other",
+      "q1_response_method_b": "q1_glp1"
+    },
+    {
+      "npi": "1487932612",
+      "specialty": "Internal Medicine",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Laggard",
+      "q1_response_method_a": "q1_other",
+      "q1_response_method_b": "q1_glp1"
+    },
+    {
+      "npi": "1013913441",
+      "specialty": "Family Medicine",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Laggard",
+      "q1_response_method_a": "q1_insulin",
+      "q1_response_method_b": "q1_other"
+    },
+    {
+      "npi": "1598977407",
+      "specialty": "Endocrinology",
+      "city": "Los Angeles",
+      "state": "CA",
+      "adoption_archetype": "Mainstream_Specialist",
+      "q1_response_method_a": "q1_dpp4",
+      "q1_response_method_b": "q1_su"
+    }
+  ],
+  "is_placeholder": false,
+  "offline_seed": true
 }

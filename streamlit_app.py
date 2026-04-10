@@ -116,6 +116,18 @@ def _render_sample_description(cohort_df: pd.DataFrame | None) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Tirzepatide Adoption Simulation", layout="wide")
+
+    with st.sidebar:
+        st.header("LLM smoke re-run")
+        st.caption("Session-only; not saved. Used when you trigger Advanced → live API re-run.")
+        smoke_model = st.text_input("Model", value="gpt-4o-mini", help="Passed to `simulation.run_batch --model`.")
+        smoke_temp = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.2, step=0.05)
+        smoke_base_url = st.text_input(
+            "API base URL (optional)",
+            value="",
+            help="OpenAI-compatible base URL (e.g. Together). Leave empty for default OpenAI.",
+        )
+
     summary = _load_json(SUMMARY_PATH)
     metrics = _load_json(METRICS_PATH)
 
@@ -143,11 +155,17 @@ def main() -> None:
     st.header("Sample description")
     _render_sample_description(cohort_df)
 
-    if summary.get("is_placeholder"):
+    if summary.get("offline_seed"):
+        st.warning(
+            "Demo bundle uses **offline deterministic seed** data (`--offline-seed-demo`), not real LLM calls. "
+            "Run `python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle` with an API key for "
+            "authentic responses."
+        )
+    elif summary.get("is_placeholder"):
         st.info(
             "Demo bundle is a **placeholder**. Run `python -m simulation.run_batch "
-            "--limit-npis 10 --save-as-demo-bundle` with `OPENAI_API_KEY` set to populate "
-            "`artifacts/demo/summary.json`."
+            "--limit-npis 10 --save-as-demo-bundle` with `OPENAI_API_KEY` (or compatible provider) set, "
+            "or use `--offline-seed-demo` if you only need a runnable pipeline without an API."
         )
 
     st.header("Results")
@@ -222,9 +240,15 @@ def main() -> None:
                     "simulation.run_batch",
                     "--limit-npis",
                     "5",
+                    "--model",
+                    smoke_model.strip() or "gpt-4o-mini",
+                    "--temperature",
+                    str(smoke_temp),
                     "--output-dir",
                     str(PROJECT_ROOT / "data" / "output" / "runs" / "streamlit_smoke"),
                 ]
+                if smoke_base_url.strip():
+                    cmd.extend(["--base-url", smoke_base_url.strip()])
                 try:
                     with st.spinner("Running batch…"):
                         proc = subprocess.run(
@@ -246,9 +270,16 @@ def main() -> None:
                     st.error(str(exc))
 
     st.divider()
+    repo_hint = os.environ.get("DEMO_REPO_URL", "").strip()
+    repo_line = (
+        f"Repository: {repo_hint}"
+        if repo_hint
+        else "Repository: set `DEMO_REPO_URL` in the environment to show a link here (optional)."
+    )
     st.caption(
-        "GitHub: link your repo here. Setup: `pip install -r requirements.txt` then "
-        "`streamlit run streamlit_app.py`. **Limitations:** Medicare Part D only; annual files; "
+        f"{repo_line} Setup: `pip install -r requirements.txt` then `streamlit run streamlit_app.py` "
+        "or `make demo`. **Keys:** `OPENAI_API_KEY` or `TOGETHER_API_KEY` with `--base-url` for OpenAI-compatible "
+        "providers (see `.env.example`). **Limitations:** Medicare Part D only; annual files; "
         "purposive cohort—not a national probability sample."
     )
 
