@@ -3,7 +3,7 @@ VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 VENV_PIP := $(VENV_DIR)/bin/pip
 
-.PHONY: venv install setup run-select-org run-group-locations docker-build docker-run clean-venv
+.PHONY: venv install setup run-select-org run-group-locations run-sample-pharma run-sample-pharma-dry run-tirzepatide-cohort run-tirzepatide-cohort-dry docker-build docker-run clean-venv
 
 venv:
 	$(PYTHON) -m venv $(VENV_DIR)
@@ -19,6 +19,18 @@ run-select-org:
 
 run-group-locations:
 	$(VENV_PYTHON) -u scripts/02_group_npis_by_practice_location.py
+
+run-sample-pharma:
+	$(VENV_PYTHON) -u scripts/05_sample_pharma_sales_cohort.py
+
+run-sample-pharma-dry:
+	$(VENV_PYTHON) -u scripts/05_sample_pharma_sales_cohort.py --dry-run
+
+run-tirzepatide-cohort:
+	$(VENV_PYTHON) -u scripts/06_tirzepatide_simulation_cohort.py
+
+run-tirzepatide-cohort-dry:
+	$(VENV_PYTHON) -u scripts/06_tirzepatide_simulation_cohort.py --dry-run
 
 docker-build:
 	docker build -t physician-society:latest .
