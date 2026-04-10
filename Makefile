@@ -1,0 +1,27 @@
+PYTHON ?= python3
+VENV_DIR ?= .venv
+VENV_PYTHON := $(VENV_DIR)/bin/python
+VENV_PIP := $(VENV_DIR)/bin/pip
+
+.PHONY: venv install setup run-select-org docker-build docker-run clean-venv
+
+venv:
+	$(PYTHON) -m venv $(VENV_DIR)
+
+install: venv
+	$(VENV_PIP) install --upgrade pip
+	$(VENV_PIP) install -r requirements.txt
+
+setup: install
+
+run-select-org:
+	$(VENV_PYTHON) scripts/01_select_organization.py
+
+docker-build:
+	docker build -t physician-society:latest .
+
+docker-run:
+	docker run --rm -it -v "$$(pwd)/data:/app/data" physician-society:latest python scripts/01_select_organization.py
+
+clean-venv:
+	rm -rf $(VENV_DIR)

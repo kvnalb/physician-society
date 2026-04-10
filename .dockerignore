@@ -1,0 +1,9 @@
+.git
+.cursor
+.venv
+__pycache__
+*.pyc
+data/raw
+data/processed
+data/output
+archive

@@ -12,9 +12,17 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, Optional, Sequence, Set, Tuple
 
-import matplotlib.pyplot as plt
-import pandas as pd
-import seaborn as sns
+try:
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    import seaborn as sns
+except ModuleNotFoundError as exc:
+    raise SystemExit(
+        "Missing dependency. Create/activate a virtualenv and install requirements:\n"
+        "  python3 -m venv .venv\n"
+        "  source .venv/bin/activate\n"
+        "  pip install -r requirements.txt"
+    ) from exc
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
