@@ -1,0 +1,542 @@
+"""Select a large healthcare organization with rich linked data coverage.
+
+This script discovers raw source files, inspects schemas, identifies candidate
+organizations from NPI registry data, enriches candidates with Part D and Open
+Payments coverage, evaluates specialty diversity, and prints a final
+recommendation summary.
+"""
+
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Dict, Iterable, Iterator, Optional, Sequence, Set, Tuple
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
+OUTPUT_DIR = PROJECT_ROOT / "data" / "output"
+FIGURES_DIR = OUTPUT_DIR / "figures"
+SCHEMA_REPORT_PATH = OUTPUT_DIR / "schema_report.txt"
+CANDIDATE_CSV_PATH = OUTPUT_DIR / "candidate_orgs.csv"
+
+# Step 0 discovery variables (populated dynamically from data/raw)
+DISCOVERED_CSV_FILES: list[Path] = []
+DISCOVERED_XLSX_FILES: list[Path] = []
+NPI_REGISTRY_PATH: Optional[Path] = None
+PARTD_2023_PATH: Optional[Path] = None
+OPEN_PAYMENTS_PATHS: list[Path] = []
+
+CHUNK_SIZE = 100_000
+TOP_ORGS_LIMIT = 50
+MIN_PHYSICIANS_PER_ORG = 150
+
+
+def normalize_header(header: str) -> str:
+    """Normalize a header into a lowercase alphanumeric token string."""
+    return "".join(ch for ch in header.lower().strip() if ch.isalnum())
+
+
+def find_column(columns: Sequence[str], candidate_names: Sequence[str]) -> Optional[str]:
+    """Find a column by trying exact and normalized matches."""
+    normalized_columns = {normalize_header(col): col for col in columns}
+    for candidate in candidate_names:
+        if candidate in columns:
+            return candidate
+        match = normalized_columns.get(normalize_header(candidate))
+        if match:
+            return match
+    return None
+
+
+def format_size(size_bytes: int) -> str:
+    """Convert bytes into a human-readable file size string."""
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(size_bytes)
+    unit_idx = 0
+    while size >= 1024 and unit_idx < len(units) - 1:
+        size /= 1024
+        unit_idx += 1
+    return f"{size:.1f}{units[unit_idx]}"
+
+
+def print_chunk_progress(step_label: str, chunk_idx: int) -> None:
+    """Print periodic chunk progress updates."""
+    if chunk_idx % 10 == 0:
+        print(f"[{step_label}] Processing chunk {chunk_idx}/~? ...")
+
+
+def chunked_csv_reader(path: Path, chunksize: int = CHUNK_SIZE) -> Iterator[pd.DataFrame]:
+    """Yield CSV chunks with UTF-8 first, then latin-1 fallback."""
+    for encoding in ("utf-8", "latin-1"):
+        try:
+            yield from pd.read_csv(path, chunksize=chunksize, low_memory=False, encoding=encoding)
+            return
+        except UnicodeDecodeError:
+            print(f"[WARN] Encoding {encoding} failed for {path.name}; trying fallback.")
+            continue
+    raise UnicodeDecodeError("utf-8", b"", 0, 1, f"Unable to decode {path}")
+
+
+def clean_str_series(series: pd.Series) -> pd.Series:
+    """Return stripped string values with NA normalized."""
+    return series.astype("string").str.strip().fillna("")
+
+
+def clean_npi_series(series: pd.Series) -> pd.Series:
+    """Normalize NPI values as stripped strings and remove invalid placeholders."""
+    cleaned = clean_str_series(series)
+    cleaned = cleaned.replace({"": pd.NA, "nan": pd.NA, "<NA>": pd.NA, "None": pd.NA})
+    return cleaned
+
+
+def discover_files() -> None:
+    """Step 0: Discover raw files, print paths and sizes, and classify key inputs."""
+    global DISCOVERED_CSV_FILES
+    global DISCOVERED_XLSX_FILES
+    global NPI_REGISTRY_PATH
+    global PARTD_2023_PATH
+    global OPEN_PAYMENTS_PATHS
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    discovered = sorted(
+        [p for p in RAW_DATA_DIR.rglob("*") if p.is_file() and p.suffix.lower() in {".csv", ".xlsx"}],
+        key=lambda p: str(p),
+    )
+    DISCOVERED_CSV_FILES = [p for p in discovered if p.suffix.lower() == ".csv"]
+    DISCOVERED_XLSX_FILES = [p for p in discovered if p.suffix.lower() == ".xlsx"]
+
+    print("=== STEP 0: FILE DISCOVERY ===")
+    if not discovered:
+        raise FileNotFoundError(f"No CSV/XLSX files found under {RAW_DATA_DIR}")
+
+    for path in discovered:
+        rel = path.relative_to(PROJECT_ROOT)
+        print(f"{rel}  ({format_size(path.stat().st_size)})")
+
+    # Heuristic identification of key files without hardcoding exact names.
+    for path in DISCOVERED_CSV_FILES:
+        name = path.name.lower()
+        rel = str(path).lower()
+        if NPI_REGISTRY_PATH is None and ("npidata" in name or "nppes" in rel):
+            NPI_REGISTRY_PATH = path
+        if PARTD_2023_PATH is None and (
+            ("part_d" in rel or "dpr" in rel or "prescribers" in rel)
+            and ("2023" in rel or "dy23" in rel)
+        ):
+            PARTD_2023_PATH = path
+        if "op_dtl" in name and ("pgyr2022" in rel or "pgyr2023" in rel):
+            OPEN_PAYMENTS_PATHS.append(path)
+
+    OPEN_PAYMENTS_PATHS = sorted(OPEN_PAYMENTS_PATHS, key=lambda p: str(p))
+
+    if NPI_REGISTRY_PATH is None:
+        raise FileNotFoundError("Could not identify NPI registry CSV from discovered files.")
+    if PARTD_2023_PATH is None:
+        raise FileNotFoundError("Could not identify Part D 2023 CSV from discovered files.")
+    if not OPEN_PAYMENTS_PATHS:
+        raise FileNotFoundError("Could not identify Open Payments CSV files from discovered files.")
+
+    print("\nSelected key files:")
+    print(f"- NPI registry: {NPI_REGISTRY_PATH.relative_to(PROJECT_ROOT)}")
+    print(f"- Part D 2023: {PARTD_2023_PATH.relative_to(PROJECT_ROOT)}")
+    print("- Open Payments files:")
+    for p in OPEN_PAYMENTS_PATHS:
+        print(f"  - {p.relative_to(PROJECT_ROOT)}")
+
+
+def write_schema_report() -> None:
+    """Step 1: Inspect schemas and write a schema report."""
+    print("\n=== STEP 1: SCHEMA INSPECTION ===")
+    lines: list[str] = []
+
+    for path in DISCOVERED_CSV_FILES:
+        lines.append(f"\n### {path.relative_to(PROJECT_ROOT)}")
+        try:
+            sample_df = pd.read_csv(path, nrows=5, low_memory=False)
+        except UnicodeDecodeError:
+            sample_df = pd.read_csv(path, nrows=5, low_memory=False, encoding="latin-1")
+
+        lines.append("Columns and dtypes:")
+        for col in sample_df.columns:
+            lines.append(f"- {col}: {sample_df[col].dtype}")
+        lines.append("First 5 rows:")
+        lines.append(sample_df.to_string(index=False))
+        print(f"Inspected: {path.relative_to(PROJECT_ROOT)}")
+
+    for path in DISCOVERED_XLSX_FILES:
+        lines.append(f"\n### {path.relative_to(PROJECT_ROOT)}")
+        sample_df = pd.read_excel(path, nrows=5)
+        lines.append("Columns and dtypes:")
+        for col in sample_df.columns:
+            lines.append(f"- {col}: {sample_df[col].dtype}")
+        lines.append("First 5 rows:")
+        lines.append(sample_df.to_string(index=False))
+        print(f"Inspected: {path.relative_to(PROJECT_ROOT)}")
+
+    SCHEMA_REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Schema report saved: {SCHEMA_REPORT_PATH.relative_to(PROJECT_ROOT)}")
+
+
+def infer_npi_registry_columns(columns: Sequence[str]) -> Tuple[str, str, str, Optional[str], Optional[str], Optional[str]]:
+    """Infer required NPI registry columns across schema variants."""
+    npi_col = find_column(
+        columns,
+        ["NPI", "npi", "Provider NPI", "Provider_NPI"],
+    )
+    entity_type_col = find_column(
+        columns,
+        ["Entity Type Code", "Entity_Type_Code", "entity_type_code"],
+    )
+    org_col = find_column(
+        columns,
+        [
+            "Provider Organization Name (Legal Business Name)",
+            "Provider Organization Name",
+            "Provider_Organization_Name",
+            "Provider Organization Name (Legal Business Name)_1",
+        ],
+    )
+    taxonomy_code_col = find_column(
+        columns,
+        [
+            "Healthcare Provider Taxonomy Code_1",
+            "Healthcare Provider Taxonomy Code 1",
+            "Provider Taxonomy Code_1",
+            "Taxonomy Code_1",
+        ],
+    )
+    taxonomy_desc_col = find_column(
+        columns,
+        [
+            "Healthcare Provider Primary Taxonomy Switch_1",
+            "Healthcare Provider Taxonomy Group_1",
+            "Healthcare Provider Taxonomy Description_1",
+            "Taxonomy Description_1",
+        ],
+    )
+    credential_col = find_column(
+        columns,
+        [
+            "Provider Credential Text",
+            "Provider Credential Text_1",
+            "Provider Credentials",
+        ],
+    )
+
+    missing = [name for name, col in [("NPI", npi_col), ("Entity Type Code", entity_type_col), ("Organization Name", org_col)] if col is None]
+    if missing:
+        raise ValueError(f"Missing required NPI columns: {missing}")
+
+    return npi_col, entity_type_col, org_col, taxonomy_code_col, taxonomy_desc_col, credential_col
+
+
+def infer_partd_npi_column(columns: Sequence[str]) -> str:
+    """Infer the NPI column name for Part D files."""
+    npi_col = find_column(columns, ["NPI", "npi", "Prscrbr_NPI", "Provider NPI"])
+    if npi_col is None:
+        raise ValueError("Could not identify NPI column in Part D file.")
+    return npi_col
+
+
+def infer_open_payments_npi_column(columns: Sequence[str]) -> str:
+    """Infer the NPI column name for Open Payments files."""
+    npi_col = find_column(
+        columns,
+        [
+            "Covered_Recipient_NPI",
+            "Covered Recipient NPI",
+            "Physician_NPI",
+            "NPI",
+        ],
+    )
+    if npi_col is None:
+        raise ValueError("Could not identify NPI column in Open Payments file.")
+    return npi_col
+
+
+def specialty_label(row: pd.Series, taxonomy_code_col: Optional[str], taxonomy_desc_col: Optional[str], credential_col: Optional[str]) -> str:
+    """Build a readable specialty label from available NPI fields."""
+    code = ""
+    desc = ""
+    credential = ""
+    if taxonomy_code_col and taxonomy_code_col in row:
+        code = str(row[taxonomy_code_col]).strip()
+    if taxonomy_desc_col and taxonomy_desc_col in row:
+        desc = str(row[taxonomy_desc_col]).strip()
+    if credential_col and credential_col in row:
+        credential = str(row[credential_col]).strip()
+
+    if desc and desc.lower() not in {"nan", "none", "<na>"}:
+        return desc
+    if credential and credential.lower() not in {"nan", "none", "<na>"}:
+        return f"Credential: {credential}"
+    if code and code.lower() not in {"nan", "none", "<na>"}:
+        return f"Taxonomy {code}"
+    return "Unknown"
+
+
+def build_candidate_organizations() -> Tuple[pd.DataFrame, Dict[str, Set[str]], Dict[str, str], Dict[str, str]]:
+    """Step 2: Build candidate organizations from NPI data."""
+    print("\n=== STEP 2: FIND CANDIDATE ORGANIZATIONS ===")
+    org_to_npis: Dict[str, Set[str]] = defaultdict(set)
+    npi_to_org: Dict[str, str] = {}
+    npi_to_specialty: Dict[str, str] = {}
+
+    first_chunk = next(chunked_csv_reader(NPI_REGISTRY_PATH))
+    npi_col, entity_type_col, org_col, taxonomy_code_col, taxonomy_desc_col, credential_col = infer_npi_registry_columns(first_chunk.columns)
+
+    # Re-run from beginning now that schema is inferred.
+    for idx, chunk in enumerate(chunked_csv_reader(NPI_REGISTRY_PATH), start=1):
+        print_chunk_progress("Step 2", idx)
+
+        chunk[entity_type_col] = clean_str_series(chunk[entity_type_col])
+        chunk[org_col] = clean_str_series(chunk[org_col])
+        chunk[npi_col] = clean_npi_series(chunk[npi_col])
+
+        filtered = chunk[(chunk[entity_type_col] == "1") & (chunk[org_col] != "") & chunk[npi_col].notna()].copy()
+        if filtered.empty:
+            continue
+
+        for _, row in filtered.iterrows():
+            org = str(row[org_col]).strip()
+            npi = str(row[npi_col]).strip()
+            org_to_npis[org].add(npi)
+            npi_to_org[npi] = org
+            npi_to_specialty[npi] = specialty_label(row, taxonomy_code_col, taxonomy_desc_col, credential_col)
+
+    rows = [{"org_name": org, "physician_count": len(npis)} for org, npis in org_to_npis.items() if len(npis) >= MIN_PHYSICIANS_PER_ORG]
+    candidates = pd.DataFrame(rows).sort_values("physician_count", ascending=False).head(TOP_ORGS_LIMIT).reset_index(drop=True)
+    if candidates.empty:
+        raise RuntimeError("No organizations met the minimum physician threshold.")
+
+    top30 = candidates.head(30).iloc[::-1]
+    plt.figure(figsize=(12, 10))
+    sns.barplot(data=top30, x="physician_count", y="org_name", color="#377eb8")
+    plt.title("Top 30 Healthcare Organizations by Physician Count")
+    plt.xlabel("Physician Count")
+    plt.ylabel("Organization")
+    plt.tight_layout()
+    plt.savefig(FIGURES_DIR / "org_physician_counts.png", dpi=200)
+    plt.close()
+
+    candidates.to_csv(CANDIDATE_CSV_PATH, index=False)
+    print(f"Saved initial candidates: {CANDIDATE_CSV_PATH.relative_to(PROJECT_ROOT)}")
+
+    top_orgs = set(candidates["org_name"])
+    top_org_to_npis = {org: npis for org, npis in org_to_npis.items() if org in top_orgs}
+    return candidates, top_org_to_npis, npi_to_org, npi_to_specialty
+
+
+def add_partd_coverage(candidates: pd.DataFrame, top_org_to_npis: Dict[str, Set[str]], npi_to_org: Dict[str, str]) -> Tuple[pd.DataFrame, Dict[str, Set[str]]]:
+    """Step 3: Add Part D physician coverage by organization."""
+    print("\n=== STEP 3: ENRICH WITH PART D COVERAGE ===")
+    org_to_partd_npis: Dict[str, Set[str]] = {org: set() for org in top_org_to_npis}
+    target_npis = set(npi_to_org.keys())
+
+    first_chunk = next(chunked_csv_reader(PARTD_2023_PATH))
+    partd_npi_col = infer_partd_npi_column(first_chunk.columns)
+
+    for idx, chunk in enumerate(chunked_csv_reader(PARTD_2023_PATH), start=1):
+        print_chunk_progress("Step 3", idx)
+        chunk[partd_npi_col] = clean_npi_series(chunk[partd_npi_col])
+        npi_values = set(chunk[partd_npi_col].dropna().astype(str))
+        matches = npi_values & target_npis
+        if not matches:
+            continue
+        for npi in matches:
+            org = npi_to_org.get(npi)
+            if org in org_to_partd_npis:
+                org_to_partd_npis[org].add(npi)
+
+    partd_counts = {org: len(npis) for org, npis in org_to_partd_npis.items()}
+    candidates["partd_physician_count"] = candidates["org_name"].map(partd_counts).fillna(0).astype(int)
+    candidates["partd_coverage_pct"] = (candidates["partd_physician_count"] / candidates["physician_count"] * 100).round(2)
+
+    plt.figure(figsize=(12, 8))
+    sns.scatterplot(data=candidates, x="physician_count", y="partd_coverage_pct", s=90)
+    for _, row in candidates.head(10).iterrows():
+        plt.text(row["physician_count"], row["partd_coverage_pct"], str(row["org_name"])[:40], fontsize=8)
+    plt.title("Organization Size vs Part D Data Coverage")
+    plt.xlabel("Total Physicians")
+    plt.ylabel("Part D Coverage (%)")
+    plt.tight_layout()
+    plt.savefig(FIGURES_DIR / "org_partd_coverage.png", dpi=200)
+    plt.close()
+
+    return candidates, org_to_partd_npis
+
+
+def add_open_payments_coverage(candidates: pd.DataFrame, top_org_to_npis: Dict[str, Set[str]], npi_to_org: Dict[str, str]) -> Tuple[pd.DataFrame, Dict[str, Set[str]]]:
+    """Step 4: Add Open Payments physician coverage by organization."""
+    print("\n=== STEP 4: ENRICH WITH OPEN PAYMENTS COVERAGE ===")
+    org_to_payment_npis: Dict[str, Set[str]] = {org: set() for org in top_org_to_npis}
+    target_npis = set(npi_to_org.keys())
+
+    for payments_path in OPEN_PAYMENTS_PATHS:
+        print(f"Scanning Open Payments file: {payments_path.relative_to(PROJECT_ROOT)}")
+        first_chunk = next(chunked_csv_reader(payments_path))
+        payments_npi_col = infer_open_payments_npi_column(first_chunk.columns)
+
+        for idx, chunk in enumerate(chunked_csv_reader(payments_path), start=1):
+            print_chunk_progress(f"Step 4 ({payments_path.name})", idx)
+            chunk[payments_npi_col] = clean_npi_series(chunk[payments_npi_col])
+            npi_values = set(chunk[payments_npi_col].dropna().astype(str))
+            matches = npi_values & target_npis
+            if not matches:
+                continue
+            for npi in matches:
+                org = npi_to_org.get(npi)
+                if org in org_to_payment_npis:
+                    org_to_payment_npis[org].add(npi)
+
+    payment_counts = {org: len(npis) for org, npis in org_to_payment_npis.items()}
+    candidates["payments_physician_count"] = candidates["org_name"].map(payment_counts).fillna(0).astype(int)
+    candidates["payments_coverage_pct"] = (candidates["payments_physician_count"] / candidates["physician_count"] * 100).round(2)
+
+    top15 = candidates.head(15).copy()
+    top15 = top15.iloc[::-1]
+    y_positions = range(len(top15))
+    bar_h = 0.25
+
+    plt.figure(figsize=(14, 10))
+    plt.barh([y - bar_h for y in y_positions], top15["physician_count"], height=bar_h, label="Total physicians")
+    plt.barh(y_positions, top15["partd_physician_count"], height=bar_h, label="With Part D data")
+    plt.barh([y + bar_h for y in y_positions], top15["payments_physician_count"], height=bar_h, label="With Open Payments data")
+    plt.yticks(list(y_positions), top15["org_name"])
+    plt.title("Data Coverage by Organization (Top 15)")
+    plt.xlabel("Physician Count")
+    plt.ylabel("Organization")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(FIGURES_DIR / "org_data_coverage.png", dpi=200)
+    plt.close()
+
+    return candidates, org_to_payment_npis
+
+
+def run_specialty_diversity_check(
+    candidates: pd.DataFrame,
+    top_org_to_npis: Dict[str, Set[str]],
+    org_to_partd_npis: Dict[str, Set[str]],
+    org_to_payment_npis: Dict[str, Set[str]],
+    npi_to_specialty: Dict[str, str],
+) -> None:
+    """Step 5: Print specialty diversity summaries and build composition chart."""
+    print("\n=== STEP 5: SPECIALTY DIVERSITY CHECK ===")
+    top5 = candidates.sort_values("partd_physician_count", ascending=False).head(5)
+    specialty_mix_rows: list[dict[str, object]] = []
+
+    for _, row in top5.iterrows():
+        org = str(row["org_name"])
+        org_npis = top_org_to_npis.get(org, set())
+        specialty_counts: Counter[str] = Counter(npi_to_specialty.get(npi, "Unknown") for npi in org_npis)
+        distinct_specialties = sum(1 for _, c in specialty_counts.items() if c > 0)
+
+        print(f"\nOrganization: {org}")
+        print(f"- Total physicians with Part D data: {len(org_to_partd_npis.get(org, set()))}")
+        payments_count = len(org_to_payment_npis.get(org, set()))
+        payments_pct = (payments_count / max(len(org_npis), 1)) * 100
+        print(f"- Open Payments coverage: {payments_count} ({payments_pct:.2f}%)")
+        print(f"- Distinct specialties: {distinct_specialties}")
+        print("- Top 10 specialties:")
+        for specialty, count in specialty_counts.most_common(10):
+            print(f"  - {specialty}: {count}")
+
+        top5_specs = specialty_counts.most_common(5)
+        top5_names = {name for name, _ in top5_specs}
+        other_count = sum(count for name, count in specialty_counts.items() if name not in top5_names)
+        for spec_name, count in top5_specs:
+            specialty_mix_rows.append({"org_name": org, "specialty": spec_name, "count": count})
+        if other_count > 0:
+            specialty_mix_rows.append({"org_name": org, "specialty": "Other", "count": other_count})
+
+    mix_df = pd.DataFrame(specialty_mix_rows)
+    if not mix_df.empty:
+        pivot_df = mix_df.pivot_table(index="org_name", columns="specialty", values="count", aggfunc="sum", fill_value=0)
+        pivot_df = pivot_df.loc[top5["org_name"]]
+        pivot_df.plot(kind="barh", stacked=True, figsize=(14, 8), colormap="tab20")
+        plt.title("Specialty Mix: Top 5 Candidate Organizations")
+        plt.xlabel("Physician Count")
+        plt.ylabel("Organization")
+        plt.tight_layout()
+        plt.savefig(FIGURES_DIR / "org_specialty_mix.png", dpi=200)
+        plt.close()
+
+
+def print_recommendation(
+    candidates: pd.DataFrame,
+    top_org_to_npis: Dict[str, Set[str]],
+    org_to_partd_npis: Dict[str, Set[str]],
+    org_to_payment_npis: Dict[str, Set[str]],
+    npi_to_specialty: Dict[str, str],
+) -> None:
+    """Step 6: Print final structured recommendation and output manifest."""
+    print("\n=== ORGANIZATION SELECTION RECOMMENDATION ===")
+    ranked = candidates.sort_values(
+        by=["partd_physician_count", "payments_physician_count", "physician_count"],
+        ascending=False,
+    ).reset_index(drop=True)
+
+    labels = ["Top pick", "Runner-up", "Runner-up 2"]
+    for label, (_, row) in zip(labels, ranked.head(3).iterrows()):
+        org = str(row["org_name"])
+        org_npis = top_org_to_npis.get(org, set())
+        partd_count = len(org_to_partd_npis.get(org, set()))
+        payments_count = len(org_to_payment_npis.get(org, set()))
+        partd_pct = (partd_count / max(len(org_npis), 1)) * 100
+        pay_pct = (payments_count / max(len(org_npis), 1)) * 100
+        specialty_counts = Counter(npi_to_specialty.get(npi, "Unknown") for npi in org_npis)
+        top5_specs = specialty_counts.most_common(5)
+
+        print(f"\n{label}: {org}")
+        print(f"- Total physicians in NPI: {len(org_npis)}")
+        print(f"- With Part D prescribing data: {partd_count} ({partd_pct:.2f}%)")
+        print(f"- With any Open Payments record: {payments_count} ({pay_pct:.2f}%)")
+        print(f"- Distinct specialties represented: {len(specialty_counts)}")
+        print(f"- Top 5 specialties: {top5_specs}")
+        print(
+            "- Why this org: Strong physician scale with high overlap across prescribing and "
+            "Open Payments sources, enabling realistic network simulation."
+        )
+
+    print("\nData quality concerns:")
+    print("- Source schemas vary by release year; dynamic column inference was applied.")
+    print("- Some files may require latin-1 encoding fallback.")
+    print("- Missing or malformed NPIs are excluded from joins after normalization.")
+
+    print("\nFiles created:")
+    created_files = [
+        CANDIDATE_CSV_PATH,
+        SCHEMA_REPORT_PATH,
+        FIGURES_DIR / "org_physician_counts.png",
+        FIGURES_DIR / "org_partd_coverage.png",
+        FIGURES_DIR / "org_data_coverage.png",
+        FIGURES_DIR / "org_specialty_mix.png",
+    ]
+    for file_path in created_files:
+        print(f"- {file_path.relative_to(PROJECT_ROOT)}")
+
+
+def main() -> None:
+    """Execute all organization selection steps in sequence."""
+    sns.set_theme(style="whitegrid")
+    discover_files()
+    write_schema_report()  # Must complete before Step 2.
+    candidates, top_org_to_npis, npi_to_org, npi_to_specialty = build_candidate_organizations()
+    candidates, org_to_partd_npis = add_partd_coverage(candidates, top_org_to_npis, npi_to_org)
+    candidates, org_to_payment_npis = add_open_payments_coverage(candidates, top_org_to_npis, npi_to_org)
+    candidates.to_csv(CANDIDATE_CSV_PATH, index=False)
+    run_specialty_diversity_check(candidates, top_org_to_npis, org_to_partd_npis, org_to_payment_npis, npi_to_specialty)
+    print_recommendation(candidates, top_org_to_npis, org_to_partd_npis, org_to_payment_npis, npi_to_specialty)
+    print(f"\nFinal enriched candidates saved: {CANDIDATE_CSV_PATH.relative_to(PROJECT_ROOT)}")
+
+
+if __name__ == "__main__":
+    main()
