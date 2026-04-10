@@ -9,3 +9,7 @@ __pycache__/
 *.pyc
 .DS_Store
 notebooks/
+
+# Large regenerated location aggregates (run scripts/02_group_npis_by_practice_location.py)
+data/output/npi_practice_location.tsv
+data/output/practice_location_npi_counts.tsv

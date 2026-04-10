@@ -1,16 +1,17 @@
 """Select a large healthcare organization with rich linked data coverage.
 
-This script discovers raw source files, inspects schemas, identifies candidate
-organizations from NPI registry data, enriches candidates with Part D and Open
-Payments coverage, evaluates specialty diversity, and prints a final
-recommendation summary.
+This script discovers raw source files, inspects schemas, and can either run
+targeted descriptive analysis (default) to inform filter choices, or the full
+selection and enrichment pipeline when requested.
 """
 
 from __future__ import annotations
 
+import argparse
 from collections import Counter, defaultdict
+from itertools import chain
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, Optional, Sequence, Set, Tuple
+from typing import Dict, Iterator, Optional, Sequence, Set, Tuple
 
 try:
     import matplotlib.pyplot as plt
@@ -31,6 +32,7 @@ OUTPUT_DIR = PROJECT_ROOT / "data" / "output"
 FIGURES_DIR = OUTPUT_DIR / "figures"
 SCHEMA_REPORT_PATH = OUTPUT_DIR / "schema_report.txt"
 CANDIDATE_CSV_PATH = OUTPUT_DIR / "candidate_orgs.csv"
+DESCRIPTIVE_REPORT_PATH = OUTPUT_DIR / "descriptive_analysis.txt"
 
 # Step 0 discovery variables (populated dynamically from data/raw)
 DISCOVERED_CSV_FILES: list[Path] = []
@@ -100,6 +102,12 @@ def clean_npi_series(series: pd.Series) -> pd.Series:
     cleaned = clean_str_series(series)
     cleaned = cleaned.replace({"": pd.NA, "nan": pd.NA, "<NA>": pd.NA, "None": pd.NA})
     return cleaned
+
+
+def entity_type_is_individual(series: pd.Series) -> pd.Series:
+    """Return mask for NPPES Entity Type Code == 1 (handles float 1.0 from CSV)."""
+    numeric = pd.to_numeric(series, errors="coerce")
+    return numeric == 1
 
 
 def discover_files() -> None:
@@ -197,6 +205,122 @@ def write_schema_report() -> None:
 
     SCHEMA_REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
     print(f"Schema report saved: {SCHEMA_REPORT_PATH.relative_to(PROJECT_ROOT)}")
+
+
+def run_descriptive_analysis() -> None:
+    """Summarize NPPES, Part D, and Open Payments without selection filters."""
+    print("\n=== DESCRIPTIVE ANALYSIS (no org filters) ===")
+
+    lines: list[str] = []
+    lines.append("=== DESCRIPTIVE DATA ANALYSIS ===\n")
+    lines.append("Purpose: inform filter choices before organization selection.\n")
+
+    # --- NPPES ---
+    lines.append("\n--- NPPES registry (full chunked pass) ---\n")
+    npi_reader = chunked_csv_reader(NPI_REGISTRY_PATH)
+    first = next(npi_reader)
+    npi_col, entity_type_col, org_col, _, _, _ = infer_npi_registry_columns(first.columns)
+
+    total_rows = 0
+    entity_raw_counts: Counter[str] = Counter()
+    type1_rows = 0
+    type1_valid_npi = 0
+    type1_org_nonempty = 0
+    type1_org_empty = 0
+    org_sizes: Counter[str] = Counter()
+
+    for idx, chunk in enumerate(chain([first], npi_reader), start=1):
+        print_chunk_progress("Descriptive NPPES", idx)
+        total_rows += len(chunk)
+
+        raw_et = chunk[entity_type_col]
+        for v in raw_et.fillna("__NA__").astype(str).str.strip():
+            entity_raw_counts[v] += 1
+
+        is_t1 = entity_type_is_individual(raw_et)
+        chunk[npi_col] = clean_npi_series(chunk[npi_col])
+        chunk[org_col] = clean_str_series(chunk[org_col])
+
+        t1 = chunk[is_t1]
+        type1_rows += len(t1)
+        if not t1.empty:
+            vn = t1[npi_col].notna()
+            type1_valid_npi += int(vn.sum())
+            org_filled = t1[org_col] != ""
+            type1_org_nonempty += int((vn & org_filled).sum())
+            type1_org_empty += int((vn & ~org_filled).sum())
+            sub = t1[vn & org_filled]
+            for org in sub[org_col].astype(str).str.strip():
+                org_sizes[org] += 1
+
+    lines.append(f"Total rows: {total_rows:,}\n")
+    lines.append(f"Entity Type Code raw value counts (top 15 by frequency):\n")
+    for val, c in entity_raw_counts.most_common(15):
+        lines.append(f"  {repr(val)}: {c:,}\n")
+    lines.append(f"\nRows with Entity Type Code == 1 (numeric): {type1_rows:,}\n")
+    lines.append(f"Among type-1 rows with valid NPI: {type1_valid_npi:,}\n")
+    lines.append(f"  With non-empty organization name: {type1_org_nonempty:,}\n")
+    lines.append(f"  With empty organization name: {type1_org_empty:,}\n")
+    if type1_valid_npi:
+        pct = 100.0 * type1_org_nonempty / type1_valid_npi
+        lines.append(f"  Share of type-1 (valid NPI) with org name: {pct:.2f}%\n")
+
+    n_orgs = len(org_sizes)
+    lines.append(f"\nDistinct organization names (type-1, valid NPI, non-empty org): {n_orgs:,}\n")
+    if org_sizes:
+        sizes = list(org_sizes.values())
+        lines.append(f"Physicians per org (row counts; min / max / mean): {min(sizes)} / {max(sizes)} / {sum(sizes)/len(sizes):.2f}\n")
+        thresholds = [10, 50, 100, 150, 200, 500]
+        lines.append("Organizations at or above size threshold (physician row counts):\n")
+        for t in thresholds:
+            n = sum(1 for s in sizes if s >= t)
+            lines.append(f"  >= {t}: {n:,} orgs\n")
+        lines.append("\nTop 40 organizations by physician row count (type-1, org name present):\n")
+        for org, cnt in org_sizes.most_common(40):
+            safe = org.replace("\n", " ")[:120]
+            lines.append(f"  {cnt:6d}  {safe}\n")
+
+    # --- Part D ---
+    lines.append("\n--- Part D 2023 (chunked row and NPI presence) ---\n")
+    partd_reader = chunked_csv_reader(PARTD_2023_PATH)
+    partd_first = next(partd_reader)
+    partd_npi_col = infer_partd_npi_column(partd_first.columns)
+    pd_rows = 0
+    pd_npi_nonnull = 0
+    for idx, chunk in enumerate(chain([partd_first], partd_reader), start=1):
+        print_chunk_progress("Descriptive Part D", idx)
+        pd_rows += len(chunk)
+        s = clean_npi_series(chunk[partd_npi_col])
+        pd_npi_nonnull += int(s.notna().sum())
+    lines.append(f"Total rows: {pd_rows:,}\n")
+    lines.append(f"Rows with non-null NPI (after normalize): {pd_npi_nonnull:,}\n")
+    if pd_rows:
+        lines.append(f"Share with NPI: {100.0 * pd_npi_nonnull / pd_rows:.2f}%\n")
+
+    # --- Open Payments ---
+    lines.append("\n--- Open Payments files (per file: rows, NPI presence) ---\n")
+    for pay_path in OPEN_PAYMENTS_PATHS:
+        rel = pay_path.relative_to(PROJECT_ROOT)
+        pay_reader = chunked_csv_reader(pay_path)
+        p_first = next(pay_reader)
+        pay_npi_col = infer_open_payments_npi_column(p_first.columns)
+        pr, pn = 0, 0
+        for idx, chunk in enumerate(chain([p_first], pay_reader), start=1):
+            print_chunk_progress(f"Descriptive OP {pay_path.name}", idx)
+            pr += len(chunk)
+            s = clean_npi_series(chunk[pay_npi_col])
+            pn += int(s.notna().sum())
+        lines.append(f"{rel}\n")
+        lines.append(f"  rows: {pr:,}; non-null NPI: {pn:,}")
+        if pr:
+            lines.append(f" ({100.0 * pn / pr:.2f}%)\n")
+        else:
+            lines.append("\n")
+
+    report = "".join(lines)
+    DESCRIPTIVE_REPORT_PATH.write_text(report, encoding="utf-8")
+    print(report)
+    print(f"\nDescriptive report saved: {DESCRIPTIVE_REPORT_PATH.relative_to(PROJECT_ROOT)}")
 
 
 def infer_npi_registry_columns(columns: Sequence[str]) -> Tuple[str, str, str, Optional[str], Optional[str], Optional[str]]:
@@ -311,11 +435,11 @@ def build_candidate_organizations() -> Tuple[pd.DataFrame, Dict[str, Set[str]], 
     for idx, chunk in enumerate(chunked_csv_reader(NPI_REGISTRY_PATH), start=1):
         print_chunk_progress("Step 2", idx)
 
-        chunk[entity_type_col] = clean_str_series(chunk[entity_type_col])
         chunk[org_col] = clean_str_series(chunk[org_col])
         chunk[npi_col] = clean_npi_series(chunk[npi_col])
 
-        filtered = chunk[(chunk[entity_type_col] == "1") & (chunk[org_col] != "") & chunk[npi_col].notna()].copy()
+        is_individual = entity_type_is_individual(chunk[entity_type_col])
+        filtered = chunk[is_individual & (chunk[org_col] != "") & chunk[npi_col].notna()].copy()
         if filtered.empty:
             continue
 
@@ -327,9 +451,13 @@ def build_candidate_organizations() -> Tuple[pd.DataFrame, Dict[str, Set[str]], 
             npi_to_specialty[npi] = specialty_label(row, taxonomy_code_col, taxonomy_desc_col, credential_col)
 
     rows = [{"org_name": org, "physician_count": len(npis)} for org, npis in org_to_npis.items() if len(npis) >= MIN_PHYSICIANS_PER_ORG]
+    if not rows:
+        raise RuntimeError(
+            f"No organizations met physician_count >= {MIN_PHYSICIANS_PER_ORG}. "
+            "Run without --full-pipeline to generate descriptive_analysis.txt, "
+            "or lower MIN_PHYSICIANS_PER_ORG in the script."
+        )
     candidates = pd.DataFrame(rows).sort_values("physician_count", ascending=False).head(TOP_ORGS_LIMIT).reset_index(drop=True)
-    if candidates.empty:
-        raise RuntimeError("No organizations met the minimum physician threshold.")
 
     top30 = candidates.head(30).iloc[::-1]
     plt.figure(figsize=(12, 10))
@@ -540,10 +668,24 @@ def print_recommendation(
 
 
 def main() -> None:
-    """Execute all organization selection steps in sequence."""
+    """Discover files, schema report, descriptive analysis; optionally full selection pipeline."""
+    parser = argparse.ArgumentParser(description="NPPES / Part D / Open Payments organization analysis.")
+    parser.add_argument(
+        "--full-pipeline",
+        action="store_true",
+        help="Run filtered org selection, Part D/Open Payments enrichment, figures, and recommendation.",
+    )
+    args = parser.parse_args()
+
     sns.set_theme(style="whitegrid")
     discover_files()
-    write_schema_report()  # Must complete before Step 2.
+    write_schema_report()
+    run_descriptive_analysis()
+
+    if not args.full_pipeline:
+        print("\nDone (descriptive only). Use --full-pipeline to run selection and enrichment after choosing filters.")
+        return
+
     candidates, top_org_to_npis, npi_to_org, npi_to_specialty = build_candidate_organizations()
     candidates, org_to_partd_npis = add_partd_coverage(candidates, top_org_to_npis, npi_to_org)
     candidates, org_to_payment_npis = add_open_payments_coverage(candidates, top_org_to_npis, npi_to_org)

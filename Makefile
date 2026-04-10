@@ -3,7 +3,7 @@ VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 VENV_PIP := $(VENV_DIR)/bin/pip
 
-.PHONY: venv install setup run-select-org docker-build docker-run clean-venv
+.PHONY: venv install setup run-select-org run-group-locations docker-build docker-run clean-venv
 
 venv:
 	$(PYTHON) -m venv $(VENV_DIR)
@@ -16,6 +16,9 @@ setup: install
 
 run-select-org:
 	$(VENV_PYTHON) scripts/01_select_organization.py
+
+run-group-locations:
+	$(VENV_PYTHON) -u scripts/02_group_npis_by_practice_location.py
 
 docker-build:
 	docker build -t physician-society:latest .
