@@ -1,3 +1,42 @@
 ---
+description: Project-wide rules for physician simulation project
 alwaysApply: true
+---
+
+# Project Context
+Building a physician persona simulation for a research engineering 
+take-home assignment. 100 real US physician personas from Medicare 
+claims data, validated against actual prescribing behavior.
+
+# Git Discipline
+- Commit after every meaningful unit of work
+- Commit messages: short, descriptive imperative or sentence-style titles
+  (e.g. "Require Part D 2023 rows in tirzepatide cohort script"); no "phase X.Y" prefix
+- Never commit data/raw/ or data/processed/ (gitignored)
+- Always commit data/output/ files (personas, ground truth — these 
+  are small JSONs that define the experiment)
+- Commit scripts BEFORE running them, then commit results AFTER 
+  reviewing output
+- If a script changes, commit the change before re-running
+
+# Code Style
+- Python 3.11+
+- Type hints on all function signatures
+- Docstrings on all public functions
+- No classes unless genuinely needed — prefer functions and dicts
+- pandas for data, no spark/dask
+- All file paths relative to project root
+- Print progress for any operation taking >10 seconds
+
+# Data Handling
+- CMS CSV files are multi-GB. ALWAYS use chunked reading.
+- NPI columns must be cast to string (they have leading zeros).
+- All joins on NPI: cast both sides to str and strip whitespace first.
+- CMS files may use latin-1 encoding, not UTF-8. Try both.
+
+# API Calls
+- Together AI for LLM inference (OpenAI-compatible API)
+- Use async where possible with concurrency semaphore
+- Always implement retry logic with exponential backoff
+- Cache responses to avoid re-running on restart
 ---
