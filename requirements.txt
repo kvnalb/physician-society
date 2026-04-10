@@ -1,0 +1,14 @@
+pandas
+numpy
+scipy
+scikit-learn
+matplotlib
+seaborn
+plotly
+jinja2
+pyyaml
+tqdm
+tenacity
+python-dotenv
+openai
+requests
