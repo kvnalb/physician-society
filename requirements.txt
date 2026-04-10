@@ -12,3 +12,4 @@ tenacity
 python-dotenv
 openai
 requests
+openpyxl

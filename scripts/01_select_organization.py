@@ -129,10 +129,17 @@ def discover_files() -> None:
         print(f"{rel}  ({format_size(path.stat().st_size)})")
 
     # Heuristic identification of key files without hardcoding exact names.
+    # Prioritize full NPPES provider file (`npidata`) over endpoint metadata files.
     for path in DISCOVERED_CSV_FILES:
         name = path.name.lower()
         rel = str(path).lower()
-        if NPI_REGISTRY_PATH is None and ("npidata" in name or "nppes" in rel):
+        if NPI_REGISTRY_PATH is None and "npidata" in name:
+            NPI_REGISTRY_PATH = path
+
+    for path in DISCOVERED_CSV_FILES:
+        name = path.name.lower()
+        rel = str(path).lower()
+        if NPI_REGISTRY_PATH is None and "nppes" in rel and "endpoint" not in name:
             NPI_REGISTRY_PATH = path
         if PARTD_2023_PATH is None and (
             ("part_d" in rel or "dpr" in rel or "prescribers" in rel)
