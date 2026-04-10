@@ -13,3 +13,11 @@ notebooks/
 # Large regenerated location aggregates (run scripts/02_group_npis_by_practice_location.py)
 data/output/npi_practice_location.tsv
 data/output/practice_location_npi_counts.tsv
+
+# Regenerated pharma / tirzepatide cohort outputs (scripts 05, 06)
+data/output/sample_100_pharma_sales_npis.tsv
+data/output/sample_100_pharma_sales_report.txt
+data/output/sample_pharma_sales_npis_dry_run.tsv
+data/output/sample_pharma_sales_report_dry_run.txt
+data/output/tirzepatide_simulation_cohort_100.tsv
+data/output/tirzepatide_simulation_cohort_report.txt
