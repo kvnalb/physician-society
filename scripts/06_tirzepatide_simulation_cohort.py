@@ -14,6 +14,7 @@ import argparse
 import gzip
 import pickle
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,6 +54,16 @@ def normalize_city(s: object) -> str:
     t = str(s).strip().upper()
     t = re.sub(r"\s+", " ", t)
     return t
+
+
+def display_city_title(c: object) -> str:
+    """Title-case city for output; safe if value is missing or float NaN."""
+    if c is None or (isinstance(c, float) and pd.isna(c)):
+        return ""
+    s = str(c).strip()
+    if not s or s.lower() == "nan":
+        return ""
+    return s.title()
 
 
 def normalize_header(header: str) -> str:
@@ -332,8 +343,8 @@ def step1_nppes(
     chunks_done = 1
 
     print(
-        f"  [NPPES] Scanning {path.name} (~10GB+; often 15–40+ min on a laptop). "
-        "Progress prints every 10 chunks — not frozen.",
+        f"  [NPPES] Scanning {path.name} (~10GB+). "
+        "One line per chunk read (CSV I/O dominates; inner loop is a small fraction).",
         flush=True,
     )
 
@@ -380,16 +391,18 @@ def step1_nppes(
                     "specialty": rec["_tax"],
                     "taxonomy_code": str(rec[tax_c]).strip() if pd.notna(rec.get(tax_c)) else "",
                     "organization_name": org or "INDIVIDUAL",
-                    "city": rec["_city"].title() if rec["_city"] else "",
+                    "city": display_city_title(rec["_city"]),
                     "state": rec["_state"],
                     "gender": str(rec[sex_c]).strip() if sex_c and pd.notna(rec.get(sex_c)) else "",
                     "credentials": str(rec[cred_c]).strip() if pd.notna(rec.get(cred_c)) else "",
                 }
             )
 
+    t_chunk0 = time.perf_counter()
     consume(first)
+    dt = time.perf_counter() - t_chunk0
     print(
-        f"  [NPPES] chunk {chunks_done} done, matched rows so far: {len(rows):,}",
+        f"  [NPPES] chunk {chunks_done} read in {dt:.1f}s — matched rows total: {len(rows):,}",
         flush=True,
     )
     if max_chunks and chunks_done >= max_chunks:
@@ -397,13 +410,14 @@ def step1_nppes(
     for idx, chunk in enumerate(reader, start=2):
         if max_chunks and chunks_done >= max_chunks:
             break
+        t0 = time.perf_counter()
         consume(chunk)
         chunks_done += 1
-        if chunks_done % 10 == 0 or chunks_done <= 5:
-            print(
-                f"  [NPPES] chunk {chunks_done} done, matched rows so far: {len(rows):,}",
-                flush=True,
-            )
+        dt = time.perf_counter() - t0
+        print(
+            f"  [NPPES] chunk {chunks_done} read in {dt:.1f}s — matched rows total: {len(rows):,}",
+            flush=True,
+        )
         if max_chunks and chunks_done >= max_chunks:
             break
 
@@ -431,7 +445,7 @@ def step2_part_d_aggregate(
     agg: DefaultDict[str, PartDAgg] = defaultdict(PartDAgg)
     chunks_done = 1
     print(
-        f"  [{progress_label}] Scanning {path.name} (large file; progress every 10 chunks)…",
+        f"  [{progress_label}] Scanning {path.name} (one line per chunk)…",
         flush=True,
     )
 
@@ -463,9 +477,10 @@ def step2_part_d_aggregate(
             if is_tirzepatide_row(str(gn), str(br)):
                 a.tirz_claims += clm
 
+    t0 = time.perf_counter()
     consume(first)
     print(
-        f"  [{progress_label}] chunk {chunks_done}, NPIs in agg so far: {len(agg):,}",
+        f"  [{progress_label}] chunk {chunks_done} in {time.perf_counter() - t0:.1f}s — NPIs in agg: {len(agg):,}",
         flush=True,
     )
     if max_chunks and chunks_done >= max_chunks:
@@ -473,13 +488,13 @@ def step2_part_d_aggregate(
     for _, chunk in enumerate(reader, start=2):
         if max_chunks and chunks_done >= max_chunks:
             break
+        t1 = time.perf_counter()
         consume(chunk)
         chunks_done += 1
-        if chunks_done % 10 == 0 or chunks_done <= 5:
-            print(
-                f"  [{progress_label}] chunk {chunks_done}, NPIs in agg so far: {len(agg):,}",
-                flush=True,
-            )
+        print(
+            f"  [{progress_label}] chunk {chunks_done} in {time.perf_counter() - t1:.1f}s — NPIs in agg: {len(agg):,}",
+            flush=True,
+        )
         if max_chunks and chunks_done >= max_chunks:
             break
     return dict(agg)
@@ -778,6 +793,12 @@ def main() -> None:
         nppes = load_pickle_gz(c1)
         part_d = load_pickle_gz(c2)
     else:
+        if not args.dry_run:
+            print(
+                "Cold run: reading multi-GB NPPES + Part D from disk (often 10–40+ min). "
+                "After this completes once, use --use-cache to skip Step 1–2.\n",
+                flush=True,
+            )
         print("Step 1: NPPES filter …")
         nppes = step1_nppes(npi_path, max_c)
         print(f"  NPPES rows after filter: {len(nppes):,}")
