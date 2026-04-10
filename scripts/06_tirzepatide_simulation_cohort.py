@@ -1,7 +1,8 @@
 """Build a stratified physician cohort for tirzepatide (2022→2023) LLM simulation.
 
 Implements the user's Step 1–6 logic against NPPES, Part D 2022, and Open Payments
-2022, with optional materialized caches for fast iteration.
+2022. The final cohort is restricted to NPIs that also appear in Part D 2023 so
+2023 metrics are available as ground truth; those columns are merged onto each row.
 
 Fast re-runs: use --use-cache after the first full pass; caches live under
 data/processed/ (gitignored). Clear with --refresh-cache.
@@ -102,6 +103,19 @@ def discover_part_d_2022() -> Path:
         if "2022" in rel and ("part_d" in rel or "prescribers" in rel or "medicare_part_d" in rel):
             return p
     raise FileNotFoundError("Part D 2022 CSV not found")
+
+
+def discover_part_d_2023_path() -> Path:
+    for path in sorted(RAW_DATA_DIR.rglob("*.csv"), key=lambda p: str(p)):
+        rel = str(path).lower()
+        name = path.name.lower()
+        if "endpoint" in name or "npidata" in name:
+            continue
+        if ("part_d" in rel or "dpr" in rel or "prescribers" in rel) and (
+            "2023" in rel or "dy23" in rel
+        ):
+            return path
+    raise FileNotFoundError("Could not find Part D 2023 CSV under data/raw")
 
 
 def discover_open_payments_2022() -> List[Path]:
@@ -249,6 +263,44 @@ class PartDAgg:
     branded_rows: int = 0
     total_rows: int = 0
     diabetes_drugs: Set[str] = field(default_factory=set)
+
+
+def part_d_ground_truth_metrics(a: PartDAgg) -> Dict[str, Any]:
+    """Per-NPI Part D aggregates as 2023 ground-truth columns (same shape as 2022)."""
+    tclaims = max(a.total_claims, 1e-9)
+    diab_share = a.diabetes_claims / tclaims
+    glp1_p = a.glp1_claims / max(a.diabetes_claims, 1e-9)
+    branded_share = a.branded_rows / max(a.total_rows, 1)
+    div = len(a.diabetes_drugs)
+    return {
+        "claims_2023": a.total_claims,
+        "beneficiaries_2023": a.total_benes,
+        "diabetes_share_2023": diab_share,
+        "glp1_penetration_2023": glp1_p,
+        "branded_share_2023": branded_share,
+        "drug_diversity_2023": div,
+        "has_tirzepatide_2023": 1 if a.tirz_claims > 0 else 0,
+        "tirzepatide_claims_2023": a.tirz_claims,
+        "part_d_rows_2023": a.total_rows,
+    }
+
+
+def merge_part_d_2023_ground_truth(
+    master: pd.DataFrame,
+    part_d_23: Dict[str, PartDAgg],
+    min_rows_2023: int,
+) -> pd.DataFrame:
+    """Keep only NPIs with Part D 2023 presence (>= min_rows_2023) and append GT columns."""
+    if master.empty:
+        return master
+    out_rows: List[Dict[str, Any]] = []
+    for _, r in master.iterrows():
+        npi = str(r["npi"])
+        agg = part_d_23.get(npi)
+        if not agg or agg.total_rows < min_rows_2023:
+            continue
+        out_rows.append({**r.to_dict(), **part_d_ground_truth_metrics(agg)})
+    return pd.DataFrame(out_rows)
 
 
 def step1_nppes(
@@ -657,11 +709,19 @@ def main() -> None:
     parser.add_argument("--dry-run-chunks", type=int, default=8)
     parser.add_argument("--use-cache", action="store_true", help="Load step caches from data/processed if present.")
     parser.add_argument("--refresh-cache", action="store_true", help="Rebuild caches (ignore existing).")
+    parser.add_argument(
+        "--min-part-d-rows-2023",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Require at least N Part D 2023 detail rows per NPI for ground truth (default: 1).",
+    )
     args = parser.parse_args()
     max_c = args.dry_run_chunks if args.dry_run else None
 
     npi_path = discover_npidata()
     pd22 = discover_part_d_2022()
+    pd23 = discover_part_d_2023_path()
     op22 = discover_open_payments_2022()
 
     c1 = cache_path("tirz_s1_nppes")
@@ -689,9 +749,25 @@ def main() -> None:
     op_df = step4_open_payments(op22, allow, max_c)
     print(f"  NPIs with payment rows: {len(op_df):,}")
 
-    print("Step 5–6: Merge, archetypes, sample …")
+    print("Step 5–6: Merge 2022, archetypes …")
     master = build_master_frame(nppes, part_d, op_df)
-    print(f"  After prescribing + diabetes filters: {len(master):,}")
+    print(f"  After prescribing + diabetes filters (2022): {len(master):,}")
+
+    cohort_npis = set(master["npi"].astype(str))
+    print("Part D 2023: aggregate for cohort candidates (ground truth) …")
+    part_d_23 = step2_part_d_aggregate(pd23, cohort_npis, max_c)
+    print(f"  NPIs with Part D 2023 rows (among cohort candidates): {len(part_d_23):,}")
+    master = merge_part_d_2023_ground_truth(master, part_d_23, args.min_part_d_rows_2023)
+    print(
+        f"  After requiring Part D 2023 (min_rows={args.min_part_d_rows_2023}): {len(master):,}"
+    )
+    if master.empty:
+        raise SystemExit(
+            "No NPIs left after Part D 2023 ground-truth filter. "
+            "Check that data/raw contains Part D 2023, or lower --min-part-d-rows-2023."
+        )
+
+    print("Stratified sample …")
     sample = stratified_sample_100(master)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -707,8 +783,10 @@ def main() -> None:
         "\nFast re-runs (this script):\n"
         "- After one FULL run, caches are written to data/processed/: "
         "tirz_s1_nppes.pkl.gz, tirz_s2_partd_agg.pkl.gz\n"
-        "- Re-run with: --use-cache (skip NPPES + Part D rescans; Open Payments still streams)\n"
+        "- Re-run with: --use-cache (skip NPPES + Part D 2022 rescans; Open Payments + Part D 2023 still stream)\n"
         "- --refresh-cache forces rebuild\n"
+        "- Final sample includes only NPIs with Part D 2023 rows; output TSV has 2023 GT columns.\n"
+        "- --min-part-d-rows-2023 (default 1) tightens the 2023 presence requirement.\n"
         "\nOther speedups (general):\n"
         "- DuckDB or Polars scan CSV with SQL/predicate pushdown\n"
         "- Export hot columns to Parquet after first pass; read Parquet only\n"
