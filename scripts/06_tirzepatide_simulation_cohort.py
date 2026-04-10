@@ -28,20 +28,21 @@ OUTPUT_DIR = PROJECT_ROOT / "data" / "output"
 
 CHUNK_SIZE = 100_000
 
-# Step 1: high-diabetes metros (state ∩ city as in spec).
+# Step 1: high-diabetes metros (state ∩ city). Six cities only — balances pool size
+# with even-ish coverage across CA / TX / NY / FL (drops Phoenix, Austin, Tampa, SF).
+# After changing TARGET_* or specialty filters, rebuild caches: --refresh-cache
 TARGET_STATES = {"CA", "TX", "NY", "FL"}
 TARGET_CITIES = {
     "HOUSTON",
-    "SAN FRANCISCO",
     "LOS ANGELES",
     "NEW YORK",
     "MIAMI",
     "DALLAS",
-    "AUSTIN",
     "SAN DIEGO",
-    "TAMPA",
-    "PHOENIX",
 }
+
+# Diabetes-focused prescribers only (exclude Cardiology and other NUCC buckets).
+DIABETES_SPECIALTIES = frozenset({"Endocrinology", "Internal Medicine", "Family Medicine"})
 
 ALLOWED_CREDENTIALS = {"MD", "DO", "MBBS", "M.D.", "D.O."}
 
@@ -289,8 +290,9 @@ def merge_part_d_2023_ground_truth(
     master: pd.DataFrame,
     part_d_23: Dict[str, PartDAgg],
     min_rows_2023: int,
+    min_beneficiaries_2023: float,
 ) -> pd.DataFrame:
-    """Keep only NPIs with Part D 2023 presence (>= min_rows_2023) and append GT columns."""
+    """Keep only NPIs with Part D 2023 presence (rows + beneficiaries) and append GT columns."""
     if master.empty:
         return master
     out_rows: List[Dict[str, Any]] = []
@@ -298,6 +300,8 @@ def merge_part_d_2023_ground_truth(
         npi = str(r["npi"])
         agg = part_d_23.get(npi)
         if not agg or agg.total_rows < min_rows_2023:
+            continue
+        if agg.total_benes < min_beneficiaries_2023:
             continue
         out_rows.append({**r.to_dict(), **part_d_ground_truth_metrics(agg)})
     return pd.DataFrame(out_rows)
@@ -340,9 +344,7 @@ def step1_nppes(
         if chunk.empty:
             return
         chunk["_tax"] = chunk[tax_c].map(taxonomy_specialty_label)
-        spec_ok = chunk["_tax"].isin(
-            ["Endocrinology", "Internal Medicine", "Family Medicine", "Cardiology"]
-        )
+        spec_ok = chunk["_tax"].isin(DIABETES_SPECIALTIES)
         chunk = chunk.loc[spec_ok]
         if chunk.empty:
             return
@@ -664,7 +666,7 @@ def stratified_sample_100(df: pd.DataFrame) -> pd.DataFrame:
 
     m2 = (
         (df["adoption_archetype"] == "Mainstream_Specialist")
-        & (df["specialty"].isin(["Endocrinology", "Cardiology"]))
+        & (df["specialty"].isin(["Endocrinology", "Internal Medicine"]))
         & (df["rank_within"] <= 2)
     )
     take_stratum(m2, 25)
@@ -716,6 +718,13 @@ def main() -> None:
         metavar="N",
         help="Require at least N Part D 2023 detail rows per NPI for ground truth (default: 1).",
     )
+    parser.add_argument(
+        "--min-beneficiaries-2023",
+        type=float,
+        default=1.0,
+        metavar="X",
+        help="Require Part D 2023 Tot_Benes sum >= X per NPI (default: 1; use to drop zero-bene rows).",
+    )
     args = parser.parse_args()
     max_c = args.dry_run_chunks if args.dry_run else None
 
@@ -724,8 +733,9 @@ def main() -> None:
     pd23 = discover_part_d_2023_path()
     op22 = discover_open_payments_2022()
 
-    c1 = cache_path("tirz_s1_nppes")
-    c2 = cache_path("tirz_s2_partd_agg")
+    # v2 suffix invalidates pickles when metro/specialty/GT filters change
+    c1 = cache_path("tirz_s1_nppes_v2")
+    c2 = cache_path("tirz_s2_partd_agg_v2")
 
     if args.use_cache and not args.refresh_cache and c1.is_file() and c2.is_file():
         print("Loading caches from data/processed/ …")
@@ -757,14 +767,20 @@ def main() -> None:
     print("Part D 2023: aggregate for cohort candidates (ground truth) …")
     part_d_23 = step2_part_d_aggregate(pd23, cohort_npis, max_c)
     print(f"  NPIs with Part D 2023 rows (among cohort candidates): {len(part_d_23):,}")
-    master = merge_part_d_2023_ground_truth(master, part_d_23, args.min_part_d_rows_2023)
+    master = merge_part_d_2023_ground_truth(
+        master,
+        part_d_23,
+        args.min_part_d_rows_2023,
+        args.min_beneficiaries_2023,
+    )
     print(
-        f"  After requiring Part D 2023 (min_rows={args.min_part_d_rows_2023}): {len(master):,}"
+        f"  After Part D 2023 GT (min_rows={args.min_part_d_rows_2023}, "
+        f"min_benes={args.min_beneficiaries_2023}): {len(master):,}"
     )
     if master.empty:
         raise SystemExit(
             "No NPIs left after Part D 2023 ground-truth filter. "
-            "Check that data/raw contains Part D 2023, or lower --min-part-d-rows-2023."
+            "Check data/raw, or lower --min-part-d-rows-2023 / --min-beneficiaries-2023."
         )
 
     print("Stratified sample …")
@@ -782,11 +798,12 @@ def main() -> None:
         f"Final sample size: {len(sample)}\n"
         "\nFast re-runs (this script):\n"
         "- After one FULL run, caches are written to data/processed/: "
-        "tirz_s1_nppes.pkl.gz, tirz_s2_partd_agg.pkl.gz\n"
+        "tirz_s1_nppes_v2.pkl.gz, tirz_s2_partd_agg_v2.pkl.gz\n"
+        "- Cohort: six target metros (CA/TX/NY/FL); specialties Endo/IM/FM only (no cardiology).\n"
         "- Re-run with: --use-cache (skip NPPES + Part D 2022 rescans; Open Payments + Part D 2023 still stream)\n"
         "- --refresh-cache forces rebuild\n"
-        "- Final sample includes only NPIs with Part D 2023 rows; output TSV has 2023 GT columns.\n"
-        "- --min-part-d-rows-2023 (default 1) tightens the 2023 presence requirement.\n"
+        "- Final sample: Part D 2023 rows + min beneficiaries (see flags); TSV includes 2023 GT columns.\n"
+        "- --min-part-d-rows-2023 (default 1), --min-beneficiaries-2023 (default 1.0).\n"
         "\nOther speedups (general):\n"
         "- DuckDB or Polars scan CSV with SQL/predicate pushdown\n"
         "- Export hot columns to Parquet after first pass; read Parquet only\n"

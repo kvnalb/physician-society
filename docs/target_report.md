@@ -29,7 +29,7 @@ This demo is a **proof of concept** for that workflow—not a production forecas
 We work with a **fixed cohort** of roughly **100 physicians** drawn through a **transparent, purposive pipeline**:
 
 - **Geography:** Practice locations in a defined set of **large U.S. metros** in selected states (commercially salient geographies for many launch plans).
-- **Clinical role:** Individual prescribers (**NPPES** type-1) in **diabetes-relevant specialties** (e.g., endocrinology, primary care, cardiology where represented).
+- **Clinical role:** Individual prescribers (**NPPES** type-1) in **diabetes-focused specialties** (endocrinology, internal medicine, family medicine; **cardiology excluded** in the cohort script to sharpen GLP‑1/diabetes narrative and balance strata).
 - **Prescribing relevance:** **Medicare Part D 2022** aggregates show **meaningful diabetes-related prescribing** (volume and share thresholds) so the unit is not a marginal prescriber in the category.
 - **Behavioral readout:** The same NPIs appear in **Part D 2023**, so we can attach **post-window** measures (e.g., GLP-1–class activity, tirzepatide-related claims where identifiable) as **scope-appropriate “ground truth”** for **revealed prescribing**, not for attitudes.
 
