@@ -331,6 +331,12 @@ def step1_nppes(
     rows: List[dict[str, Any]] = []
     chunks_done = 1
 
+    print(
+        f"  [NPPES] Scanning {path.name} (~10GB+; often 15–40+ min on a laptop). "
+        "Progress prints every 10 chunks — not frozen.",
+        flush=True,
+    )
+
     def consume(chunk: pd.DataFrame) -> None:
         et = pd.to_numeric(chunk[et_c], errors="coerce")
         mask = et == 1
@@ -356,27 +362,36 @@ def step1_nppes(
         chunk = chunk.loc[chunk["_active"]]
         if chunk.empty:
             return
-        for _, r in chunk.iterrows():
-            npi = npi_str(r[npi_c])
+        cols_for_records = [npi_c, tax_c, cred_c, "_tax", "_city", "_state"]
+        if line1_c:
+            cols_for_records.append(line1_c)
+        if sex_c:
+            cols_for_records.append(sex_c)
+        for rec in chunk[cols_for_records].to_dict("records"):
+            npi = npi_str(rec[npi_c])
             if not npi:
                 continue
             org = ""
             if line1_c:
-                org = str(r.get(line1_c, "") or "").strip()[:120]
+                org = str(rec.get(line1_c, "") or "").strip()[:120]
             rows.append(
                 {
                     "npi": npi,
-                    "specialty": r["_tax"],
-                    "taxonomy_code": str(r[tax_c]).strip() if pd.notna(r[tax_c]) else "",
+                    "specialty": rec["_tax"],
+                    "taxonomy_code": str(rec[tax_c]).strip() if pd.notna(rec.get(tax_c)) else "",
                     "organization_name": org or "INDIVIDUAL",
-                    "city": r["_city"].title() if r["_city"] else "",
-                    "state": r["_state"],
-                    "gender": str(r[sex_c]).strip() if sex_c and pd.notna(r.get(sex_c)) else "",
-                    "credentials": str(r[cred_c]).strip() if pd.notna(r.get(cred_c)) else "",
+                    "city": rec["_city"].title() if rec["_city"] else "",
+                    "state": rec["_state"],
+                    "gender": str(rec[sex_c]).strip() if sex_c and pd.notna(rec.get(sex_c)) else "",
+                    "credentials": str(rec[cred_c]).strip() if pd.notna(rec.get(cred_c)) else "",
                 }
             )
 
     consume(first)
+    print(
+        f"  [NPPES] chunk {chunks_done} done, matched rows so far: {len(rows):,}",
+        flush=True,
+    )
     if max_chunks and chunks_done >= max_chunks:
         return pd.DataFrame(rows)
     for idx, chunk in enumerate(reader, start=2):
@@ -384,6 +399,11 @@ def step1_nppes(
             break
         consume(chunk)
         chunks_done += 1
+        if chunks_done % 10 == 0 or chunks_done <= 5:
+            print(
+                f"  [NPPES] chunk {chunks_done} done, matched rows so far: {len(rows):,}",
+                flush=True,
+            )
         if max_chunks and chunks_done >= max_chunks:
             break
 
@@ -394,6 +414,8 @@ def step2_part_d_aggregate(
     path: Path,
     npi_allow: Set[str],
     max_chunks: Optional[int],
+    *,
+    progress_label: str = "Part D",
 ) -> Dict[str, PartDAgg]:
     reader = chunked_csv_reader(path)
     first = next(reader)
@@ -408,19 +430,24 @@ def step2_part_d_aggregate(
 
     agg: DefaultDict[str, PartDAgg] = defaultdict(PartDAgg)
     chunks_done = 1
+    print(
+        f"  [{progress_label}] Scanning {path.name} (large file; progress every 10 chunks)…",
+        flush=True,
+    )
 
     def consume(chunk: pd.DataFrame) -> None:
         chunk["_npi"] = chunk[npi_c].map(npi_str)
         chunk = chunk[chunk["_npi"].isin(npi_allow)]
         if chunk.empty:
             return
-        for _, r in chunk.iterrows():
-            n = r["_npi"]
+        cols = ["_npi", gnrc_c, brnd_c, clms_c, benes_c]
+        for rec in chunk[cols].to_dict("records"):
+            n = rec["_npi"]
             a = agg[n]
-            clm = float(r[clms_c]) if pd.notna(r[clms_c]) else 0.0
-            ben = float(r[benes_c]) if pd.notna(r[benes_c]) else 0.0
-            gn = r[gnrc_c]
-            br = r[brnd_c]
+            clm = float(rec[clms_c]) if pd.notna(rec[clms_c]) else 0.0
+            ben = float(rec[benes_c]) if pd.notna(rec[benes_c]) else 0.0
+            gn = rec[gnrc_c]
+            br = rec[brnd_c]
             a.total_claims += clm
             a.total_benes += ben
             a.total_rows += 1
@@ -437,6 +464,10 @@ def step2_part_d_aggregate(
                 a.tirz_claims += clm
 
     consume(first)
+    print(
+        f"  [{progress_label}] chunk {chunks_done}, NPIs in agg so far: {len(agg):,}",
+        flush=True,
+    )
     if max_chunks and chunks_done >= max_chunks:
         return dict(agg)
     for _, chunk in enumerate(reader, start=2):
@@ -444,6 +475,11 @@ def step2_part_d_aggregate(
             break
         consume(chunk)
         chunks_done += 1
+        if chunks_done % 10 == 0 or chunks_done <= 5:
+            print(
+                f"  [{progress_label}] chunk {chunks_done}, NPIs in agg so far: {len(agg):,}",
+                flush=True,
+            )
         if max_chunks and chunks_done >= max_chunks:
             break
     return dict(agg)
@@ -747,7 +783,7 @@ def main() -> None:
         print(f"  NPPES rows after filter: {len(nppes):,}")
         allow = set(nppes["npi"].astype(str))
         print("Step 2: Part D 2022 aggregate …")
-        part_d = step2_part_d_aggregate(pd22, allow, max_c)
+        part_d = step2_part_d_aggregate(pd22, allow, max_c, progress_label="Part D 2022")
         print(f"  NPIs with Part D rows: {len(part_d):,}")
         if not args.dry_run:
             save_pickle_gz(c1, nppes)
@@ -765,7 +801,7 @@ def main() -> None:
 
     cohort_npis = set(master["npi"].astype(str))
     print("Part D 2023: aggregate for cohort candidates (ground truth) …")
-    part_d_23 = step2_part_d_aggregate(pd23, cohort_npis, max_c)
+    part_d_23 = step2_part_d_aggregate(pd23, cohort_npis, max_c, progress_label="Part D 2023")
     print(f"  NPIs with Part D 2023 rows (among cohort candidates): {len(part_d_23):,}")
     master = merge_part_d_2023_ground_truth(
         master,
