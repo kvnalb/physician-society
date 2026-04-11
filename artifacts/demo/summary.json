@@ -1,54 +1,47 @@
 {
-  "generated_at": "2026-04-11T05:50:13Z",
+  "generated_at": "2026-04-11T06:42:06Z",
   "cohort_note": "Regenerate after tirzepatide_simulation_cohort_100.tsv is updated.",
   "n_npis": 100,
   "n_questions": 6,
-  "n_llm_calls": 0,
-  "model": "offline_seed",
-  "total_api_calls": 0,
+  "n_llm_calls": 100,
+  "model": "zai-org/GLM-5.1",
+  "total_api_calls": 100,
   "total_cost_usd": null,
   "simulated_distributions": {
     "f_q1_tirzepatide_12m": {
       "distribution": {
-        "f_q1_expect_selective": 21,
-        "f_q1_unsure": 27,
-        "f_q1_expect_active": 28,
-        "f_q1_expect_unlikely": 24
+        "f_q1_expect_selective": 68,
+        "f_q1_expect_unlikely": 7
       }
     },
     "f_q2_glp1_trajectory": {
       "distribution": {
-        "f_q2_flat": 33,
-        "f_q2_up": 38,
-        "f_q2_down": 29
+        "f_q2_up": 61,
+        "f_q2_flat": 14
       }
     },
     "f_q3_branded_trajectory": {
       "distribution": {
-        "f_q3_up": 38,
-        "f_q3_flat": 37,
-        "f_q3_down": 25
+        "f_q3_flat": 52,
+        "f_q3_up": 21,
+        "f_q3_down": 2
       }
     },
     "f_q4_diabetes_mix_trajectory": {
       "distribution": {
-        "f_q4_flat": 30,
-        "f_q4_down": 38,
-        "f_q4_up": 32
+        "f_q4_flat": 74,
+        "f_q4_up": 1
       }
     },
     "f_q5_panel_scale_trajectory": {
       "distribution": {
-        "f_q5_up": 27,
-        "f_q5_down": 42,
-        "f_q5_flat": 31
+        "f_q5_flat": 75
       }
     },
     "f_q6_molecule_breadth_trajectory": {
       "distribution": {
-        "f_q6_down": 33,
-        "f_q6_flat": 28,
-        "f_q6_up": 39
+        "f_q6_up": 57,
+        "f_q6_flat": 18
       }
     }
   },
@@ -105,7 +98,7 @@
       "city": "Los Angeles",
       "state": "CA",
       "adoption_archetype": "Conservative_PCP",
-      "first_question_response_method_a": "f_q1_unsure"
+      "first_question_response_method_a": "f_q1_expect_selective"
     },
     {
       "npi": "1205196987",
@@ -121,7 +114,7 @@
       "city": "Los Angeles",
       "state": "CA",
       "adoption_archetype": "Conservative_PCP",
-      "first_question_response_method_a": "f_q1_expect_active"
+      "first_question_response_method_a": "f_q1_expect_selective"
     },
     {
       "npi": "1558340034",
@@ -129,7 +122,7 @@
       "city": "Los Angeles",
       "state": "CA",
       "adoption_archetype": "Early_Adopter_Specialist",
-      "first_question_response_method_a": "f_q1_expect_unlikely"
+      "first_question_response_method_a": "f_q1_expect_selective"
     },
     {
       "npi": "1487932612",
@@ -137,7 +130,7 @@
       "city": "Los Angeles",
       "state": "CA",
       "adoption_archetype": "Laggard",
-      "first_question_response_method_a": "f_q1_unsure"
+      "first_question_response_method_a": "f_q1_expect_selective"
     },
     {
       "npi": "1013913441",
@@ -145,7 +138,7 @@
       "city": "Los Angeles",
       "state": "CA",
       "adoption_archetype": "Laggard",
-      "first_question_response_method_a": "f_q1_expect_active"
+      "first_question_response_method_a": "f_q1_expect_unlikely"
     },
     {
       "npi": "1598977407",
@@ -155,7 +148,5 @@
       "adoption_archetype": "Mainstream_Specialist",
       "first_question_response_method_a": "f_q1_expect_selective"
     }
-  ],
-  "is_placeholder": false,
-  "offline_seed": true
+  ]
 }
