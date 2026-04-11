@@ -58,21 +58,29 @@ def compute_instrument_health(
         if isinstance(errm, dict):
             survey_errors += sum(1 for v in errm.values() if v)
 
+    # Count every expected (NPI × question) cell for method_a: empty or failed joint
+    # surveys must count as missing, not skipped (previously ``if not block: continue`` hid them).
     missing_cells = 0
     for r in raw:
         if not is_v2_survey_row(r):
             continue
         for mk in ("method_a",):
             block = r.get(mk)
-            if not isinstance(block, dict) or not block:
-                continue
+            if not isinstance(block, dict):
+                block = {}
             for qid in qids:
                 cell = block.get(qid)
                 if not isinstance(cell, dict) or not cell.get("option_id"):
                     missing_cells += 1
 
     flat_with_error = sum(1 for r in flat if r.get("error"))
-    flat_without_answer = sum(1 for r in flat if not r.get("parsed_option"))
+    # ``missing_cells`` is the authoritative v2 expected-vs-answered gap (including empty ``method_a``).
+    # Legacy flat rows (non-v2 source) may lack ``method_a``; count those separately to avoid double-counting
+    # v2 rows that already appear in ``missing_cells``.
+    legacy_flat_missing = sum(
+        1 for r in flat if r.get("method") != "method_a" and not r.get("parsed_option")
+    )
+    flat_cells_missing_option = missing_cells + legacy_flat_missing
 
     return {
         "schema_notes": "v2 rows carry latency_ms_by_method and survey_error_by_method; "
@@ -82,7 +90,7 @@ def compute_instrument_health(
         "n_legacy_rows": n_legacy,
         "n_flat_cells": len(flat),
         "flat_cells_with_error": flat_with_error,
-        "flat_cells_missing_option": flat_without_answer,
+        "flat_cells_missing_option": flat_cells_missing_option,
         "v2_missing_question_cells": missing_cells,
         "v2_survey_level_errors": survey_errors,
         "latency_ms": {

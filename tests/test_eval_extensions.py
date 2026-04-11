@@ -67,6 +67,29 @@ class TestEvalExtensions(unittest.TestCase):
             self.assertEqual(h["n_v2_rows"], 1)
             self.assertEqual(h["latency_ms"]["n_calls_with_latency"], 1)
 
+    def test_instrument_health_v2_empty_block_counts_missing(self) -> None:
+        """Failed joint survey (empty ``method_a``) must count all questions as missing."""
+        row = {
+            "schema_version": 2,
+            "npi": "9",
+            "method_a": {},
+            "latency_ms_by_method": {"method_a": 50},
+            "survey_error_by_method": {"method_a": "json_decode:Expecting value: line 1 column 1 (char 0)"},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "r.jsonl"
+            p.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            qpath = Path(td) / "q.yaml"
+            qpath.write_text(
+                "questions:\n"
+                "  - question_id: q1\n    text: t\n    options:\n      - {option_id: a, label: A}\n"
+                "  - question_id: q2\n    text: t2\n    options:\n      - {option_id: x, label: X}\n",
+                encoding="utf-8",
+            )
+            h = compute_instrument_health(p, questions_yaml=qpath)
+            self.assertEqual(h["v2_missing_question_cells"], 2)
+            self.assertEqual(h["flat_cells_missing_option"], 2)
+
     def test_compute_persona_coherence_empty(self) -> None:
         pc = compute_persona_coherence([], question_ids=["q3_tirzepatide_prescribed", "q4_tirzepatide_adoption_speed"])
         self.assertEqual(pc["n_method_blocks_checked"], 0)

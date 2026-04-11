@@ -567,7 +567,8 @@ def _render_executive_snapshot(summary: dict, metrics: dict) -> None:
         st.metric(
             "Missing answer cells (instrument health)",
             int(miss),
-            help="Simulated answer cells without a chosen option—signals incomplete or failed parsing.",
+            help="Expected v2 survey cells (doctors × survey items) minus cells with a parsed option_id; includes "
+            "failed joint calls where method_a is empty—signals truncation, parse errors, or empty model content.",
         )
 
 
