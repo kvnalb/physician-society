@@ -22,7 +22,7 @@ from simulation.questions_io import Question, load_questions
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNS_ROOT = PROJECT_ROOT / "data" / "output" / "runs"
 DEFAULT_COHORT = PROJECT_ROOT / "data" / "output" / "tirzepatide_simulation_cohort_100.tsv"
-DEFAULT_MODEL_TOGETHER = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+DEFAULT_MODEL_TOGETHER = "zai-org/GLM-5.1"
 DEFAULT_MODEL_OPENAI = "gpt-4o-mini"
 
 _cache_lock = threading.Lock()

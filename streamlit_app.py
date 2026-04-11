@@ -19,7 +19,7 @@ DEFAULT_METRICS_PATH = PROJECT_ROOT / "artifacts" / "demo" / "metrics.json"
 RUNS_ROOT = PROJECT_ROOT / "data" / "output" / "runs"
 ARTIFACT_RUNS_DIR = PROJECT_ROOT / "artifacts" / "runs"
 COHORT_PATH = PROJECT_ROOT / "data" / "output" / "tirzepatide_simulation_cohort_100.tsv"
-DEFAULT_TOGETHER_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+DEFAULT_TOGETHER_MODEL = "zai-org/GLM-5.1"
 
 
 def _load_json(path: Path) -> dict:
