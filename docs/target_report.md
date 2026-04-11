@@ -139,4 +139,18 @@ The path from here to production is **scale** (more personas, more questions, ri
 
 ---
 
+## 8. Future pipeline (backlog, not current priority)
+
+### Virtual interview in Streamlit
+
+**Idea:** In the Streamlit app, let a user **pick any cohort NPI** (~100 personas) and run a **short multi-turn “interview”** with that synthetic physician—responses streamed from an LLM using a **user-supplied API key** (e.g. `OPENAI_API_KEY` in session, same hygiene pattern as the existing live smoke re-run).
+
+**Grounding:** Reuse **Method A–style** (or toggle A/B) persona text from the cohort row (`simulation/persona_methods.py`). Optionally prepend **prior survey answers** for that NPI from a selected run’s `responses__*.jsonl` (pattern similar to `simulation/persona_query.py`).
+
+**Implementation sketch:** `st.selectbox` / search on NPI; `st.session_state` for chat history; `st.chat_input` + OpenAI `chat.completions.create(..., stream=True)` and `st.write_stream`; system prompt = fixed persona + profile; **no** server-side persistence of keys or transcripts unless explicitly added later.
+
+**Non-goals for v1 of this feature:** No peer network, no claim that the chat is real physician cognition; treat as **qualitative exploration** on top of the structured survey.
+
+---
+
 *This file is the **target** narrative for the final demo write-up; implementation artifacts (Streamlit app, `artifacts/demo/`, README) should stay consistent with these scope conditions.*

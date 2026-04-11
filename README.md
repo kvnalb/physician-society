@@ -20,6 +20,8 @@ make demo
 
 Static HTML bundle (Jinja): `make report-html` → open `docs/build/demo_report.html`.
 
+**Backlog (future pipeline):** Virtual Streamlit “interview” with a selected cohort persona + streaming LLM (user key)—see [§8 in `docs/target_report.md`](docs/target_report.md#8-future-pipeline-backlog-not-current-priority).
+
 ## API keys
 
 ### Where to put the key (recommended)
