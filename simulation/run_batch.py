@@ -318,8 +318,8 @@ def _execute_one_npi_method_survey(
         temperature=temperature,
         questions=qs_ordered,
     )
-    had_error = bool(err)
-    if not err and parsed:
+    had_error = len(parsed) == 0
+    if not err and len(parsed) == len(qs_ordered):
         with _cache_lock:
             _write_cache(cache_dir, ck, {"answers": parsed, "raw": raw, "latency_ms": lat})
 
@@ -328,7 +328,7 @@ def _execute_one_npi_method_survey(
         npi,
         method_key,
         {
-            "method_block": parsed if not err else {},
+            "method_block": parsed,
             "raw": raw,
             "latency_ms": lat,
             "error": err,
