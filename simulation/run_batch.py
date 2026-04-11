@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import random
+import sys
 import threading
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
+from tqdm import tqdm
 
 from simulation.env_bootstrap import load_local_dotenv
 from simulation.llm_client import call_llm_survey_json, get_api_key, make_client
@@ -419,9 +421,18 @@ def run(
         )
 
     n_workers = max(1, min(concurrency, len(work)))
+    n_tasks = len(work)
+    desc = f"LLM survey ({n_tasks} calls, workers={n_workers})"
     with ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = [pool.submit(_submit, w) for w in work]
-        for fut in as_completed(futures):
+        for fut in tqdm(
+            as_completed(futures),
+            total=n_tasks,
+            desc=desc,
+            unit="call",
+            file=sys.stdout,
+            mininterval=0.5,
+        ):
             idx, npi, method_key, frag, hit, had_err = fut.result()
             results[idx] = (npi, method_key, frag)
             if hit:
