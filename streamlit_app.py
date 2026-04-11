@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import subprocess
@@ -25,6 +26,63 @@ RUNS_ROOT = PROJECT_ROOT / "data" / "output" / "runs"
 ARTIFACT_RUNS_DIR = PROJECT_ROOT / "artifacts" / "runs"
 COHORT_PATH = PROJECT_ROOT / "data" / "output" / "tirzepatide_simulation_cohort_100.tsv"
 DEFAULT_TOGETHER_MODEL = "zai-org/GLM-5.1"
+
+# Short labels for expander headers (Streamlit truncates long titles in the collapsed row).
+_EXPANDER_LABELS_BY_QID: dict[str, str] = {
+    "f_q1_tirzepatide_12m": "Q1 — Tirzepatide use outlook (12 months, Medicare Part D)",
+    "f_q2_glp1_trajectory": "Q2 — GLP-1 share trajectory (program year into 2023)",
+    "f_q3_branded_trajectory": "Q3 — Branded vs generic oral diabetes mix (Part D)",
+    "f_q4_diabetes_mix_trajectory": "Q4 — Diabetes-related share of Part D prescribing",
+    "f_q5_panel_scale_trajectory": "Q5 — Overall Part D activity scale vs 2022 baseline",
+    "f_q6_molecule_breadth_trajectory": "Q6 — Breadth of diabetes-relevant molecules (Part D)",
+}
+
+
+def _inject_page_styles() -> None:
+    """Subtle typography and spacing for long-form explanations (Streamlit markdown is paragraph-based)."""
+    st.markdown(
+        """
+        <style>
+          /* Slightly calmer reading width on ultra-wide monitors */
+          .block-container { max-width: 1200px; }
+          .ps-callout {
+            font-size: 0.95rem;
+            line-height: 1.55;
+            color: #1f2937;
+            background: #f8fafc;
+            border-left: 3px solid #2E5077;
+            border-radius: 6px;
+            padding: 0.75rem 1rem 0.85rem 1rem;
+            margin: 0 0 0.9rem 0;
+          }
+          .ps-callout p { margin: 0 0 0.55rem 0; }
+          .ps-callout p:last-child { margin-bottom: 0; }
+          .ps-muted {
+            font-size: 0.88rem;
+            line-height: 1.5;
+            color: #4b5563;
+            margin: 0.15rem 0 0.85rem 0;
+          }
+          h2 { margin-top: 1.25rem; }
+          h3 { margin-top: 0.85rem; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _callout_md(body_markdown: str) -> None:
+    """Render a shaded callout; ``body_markdown`` must be trusted (static app copy)."""
+    st.markdown(f'<div class="ps-callout">{body_markdown}</div>', unsafe_allow_html=True)
+
+
+def _muted_md(body_markdown: str) -> None:
+    """Smaller supporting line(s); ``body_markdown`` is trusted static copy."""
+    st.markdown(f'<div class="ps-muted">{body_markdown}</div>', unsafe_allow_html=True)
+
+
+def _expander_label(qid: str) -> str:
+    return _EXPANDER_LABELS_BY_QID.get(qid, _question_short_title(qid, max_len=96))
 
 
 @lru_cache(maxsize=1)
@@ -137,13 +195,15 @@ def _render_sample_description(cohort_df: pd.DataFrame | None) -> None:
         """
         **Who is in the sample**
 
-        - **Unit of analysis:** Individual prescribers (NPPES type-1) with practice locations in **six priority metros**
+        - **Unit of analysis:** Individual prescribers (NPPES **type 1** = individual health care providers in the
+          **National Plan and Provider Enumeration System**) with practice locations in **six priority metros**
           (Houston, Los Angeles, New York City, Miami, Dallas, San Diego).
         - **Specialties:** **Endocrinology, Internal Medicine, and Family Medicine** only. Cardiology is excluded so the
           cohort stays diabetes- and GLP-1–relevant and strata stay balanced.
         - **Prescribing gate:** **Medicare Part D 2022** aggregates show meaningful **diabetes-related** prescribing
-          (script volume and mix thresholds in the cohort builder). **Part D 2023** is required on the same NPIs so we
-          can attach **revealed** post-window measures (e.g., tirzepatide claims where identifiable).
+          (script volume and mix thresholds in the cohort builder). **Part D 2023** is required on the same
+          **National Provider Identifiers (NPIs)** so we can attach **revealed** post-window measures (for example,
+          tirzepatide claims where identifiable).
         - **Engagement:** **Open Payments (2022)** is merged for pharma exposure tiers; see breakdown tables below.
 
         **What this is not**
@@ -160,11 +220,11 @@ def _render_sample_description(cohort_df: pd.DataFrame | None) -> None:
         )
         return
 
-    st.caption(
-        "**What this block is:** a quick **QC / segment mix** view of the real cohort file the simulation draws from. "
-        "**Why it matters for the business story:** it shows *who* sits behind the GLP-1 / tirzepatide readouts—"
-        "specialty mix, priority cities, and adoption-style tags—so stakeholders do not confuse a purposive slice "
-        "with “all U.S. doctors.”"
+    _callout_md(
+        "<p><strong>What this block is.</strong> A quality-control view of the real cohort file the simulation draws "
+        "from: who is in the sample by specialty, geography bucket, and segment tags.</p>"
+        "<p><strong>Why it matters for the business story.</strong> It grounds the tirzepatide / GLP-1 readouts in a "
+        "specific slice of prescribers so stakeholders do not mistake a purposive cohort for “all U.S. doctors.”</p>"
     )
     n = len(cohort_df)
     st.subheader("Loaded cohort snapshot")
@@ -180,48 +240,64 @@ def _render_sample_description(cohort_df: pd.DataFrame | None) -> None:
     else:
         m3.metric("Typical Part D rows per doctor (2023, median)", "—")
 
-    st.caption(
-        "**How to read the three numbers:** cohort **size**, **early adoption signal** (any tirzepatide in the window "
-        "we can see in Part D), and **data richness** (how many detail rows we see per doctor in 2023)—a proxy for "
-        "how noisy segment splits might be."
+    _muted_md(
+        "<strong>How to read the three numbers.</strong><br/>"
+        "1) Cohort size.<br/>"
+        "2) Early adoption signal: share with any tirzepatide claims visible in Medicare Part D for 2023 "
+        "(the administrative window we can observe).<br/>"
+        "3) Data richness: typical count of Part D detail rows per doctor in 2023 (more rows usually means stabler "
+        "segment breakdowns)."
     )
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown("**Specialty mix**")
+        st.markdown("##### Specialty mix")
         if "specialty" in cohort_df.columns:
             s_counts = cohort_df["specialty"].value_counts().reset_index()
             s_counts.columns = ["Specialty", "Doctors"]
-            st.caption("**What / why:** count of doctors by **board-style specialty**—helps you judge whether the "
-                       "story is PCP-heavy vs endocrine-heavy.")
+            _muted_md(
+                "<strong>What this shows.</strong> Counts of doctors by board-style specialty.<br/>"
+                "<strong>Why it matters.</strong> Shows whether the narrative leans primary care (for example, "
+                "internal or family medicine) versus endocrinology-heavy."
+            )
             st.dataframe(s_counts, hide_index=True, use_container_width=True)
     with c2:
-        st.markdown("**Priority metros**")
+        st.markdown("##### Priority metros")
         if "geo_cluster" in cohort_df.columns:
             vc = cohort_df["geo_cluster"].value_counts().reset_index()
             vc.columns = ["_raw", "Doctors"]
             vc["City / region (from data bucket)"] = vc["_raw"].map(_pretty_geo_cluster)
             vc = vc[["City / region (from data bucket)", "Doctors"]]
-            st.caption("**What / why:** each **planning bucket** (e.g. Los Angeles, CA) is how we grouped practices for "
-                       "geo balance—not a street address.")
+            _muted_md(
+                "<strong>What this shows.</strong> Planning buckets used to balance geography (for example, "
+                "<em>Los Angeles, CA</em>), not street-level locations.<br/>"
+                "<strong>Why it matters.</strong> Confirms which markets drive the sample mix."
+            )
             st.dataframe(vc, hide_index=True, use_container_width=True)
     with c3:
-        st.markdown("**Adoption style tags**")
+        st.markdown("##### Adoption style tags")
         if "adoption_archetype" in cohort_df.columns:
             vc = cohort_df["adoption_archetype"].value_counts().reset_index()
             vc.columns = ["_raw", "Doctors"]
             vc["Adoption style (model tag)"] = vc["_raw"].map(_pretty_archetype)
             vc = vc[["Adoption style (model tag)", "Doctors"]]
-            st.caption("**What / why:** **internal segment labels** derived from 2022 prescribing—useful for comparing "
-                       "simulated attitudes to **revealed** 2023 behavior by segment.")
+            _muted_md(
+                "<strong>What this shows.</strong> Internal segment labels derived from 2022 prescribing patterns.<br/>"
+                "<strong>Why it matters.</strong> Lets you compare simulated June-2022-forward attitudes with "
+                "<strong>revealed</strong> 2023 prescribing outcomes within each segment."
+            )
             st.dataframe(vc, hide_index=True, use_container_width=True)
 
-    with st.expander("Data sources & limitations"):
+    with st.expander("Data sources and limitations"):
         st.markdown(
             """
-            - **Medicare Part D** annual files define prescribing visibility; non-Medicare channels are out of scope.
-            - **LLM survey** rows in this app come from `artifacts/demo/` unless you re-run the batch with an API key.
-            - Full narrative: `docs/target_report.md`.
+            - **Medicare Part D** is Medicare’s outpatient prescription drug benefit; annual claims files define what
+              prescribing we can see here. Non-Medicare channels are out of scope.
+
+            - **Simulated survey rows** shown in this app default to the packaged `artifacts/demo/` bundle unless you
+              re-run the batch with an API key.
+
+            - **Full methodology narrative:** `docs/target_report.md`.
             """
         )
 
@@ -237,21 +313,28 @@ def _distribution_from_summary_entry(dists: dict) -> dict[str, int]:
 
 def _render_simulated_distributions_from_summary(summary: dict) -> None:
     st.subheader("Simulated survey (answer counts)")
-    st.caption(
-        "**What this is:** tally of **simulated choices** per survey item from the single **method_a** stream "
-        "(production, naive, or legacy rich **a** persona). **Why it matters:** shows the **scenario shape** your "
-        "workshop is built on before comparing to Medicare hold-out readouts."
+    _callout_md(
+        "<p><strong>What this is.</strong> A tally of simulated answer choices for each survey item, using the "
+        "primary simulation stream labeled <code>method_a</code> in the pipeline (persona variant such as "
+        "production or legacy rich “a”).</p>"
+        "<p><strong>Why it matters.</strong> It shows the <em>shape</em> of the simulated workshop responses before "
+        "you compare them to later Medicare Part D hold-out summaries derived from claims.</p>"
     )
     mc = summary.get("simulated_distributions") or summary.get("method_comparison") or {}
     if not mc:
         st.info("No saved distributions in `summary.json` yet—run a batch with `--save-as-demo-bundle`.")
         return
     for qid, dists in mc.items():
-        title = _question_short_title(qid)
         labels = _option_labels_for_question(qid)
         counts = _distribution_from_summary_entry(dists if isinstance(dists, dict) else {})
-        with st.expander(title):
-            st.caption(f"Internal id: `{qid}` — use the tables below, not raw option codes, when presenting.")
+        with st.expander(_expander_label(qid)):
+            q_obj = _question_by_id(qid)
+            if q_obj:
+                st.markdown(f"**Full survey wording.** {q_obj.text.strip()}")
+            st.markdown(
+                f"**Internal identifier (for logs):** `{html.escape(qid)}` — use the human-readable labels in the "
+                "table below when presenting, not raw option codes."
+            )
             st.dataframe(_dist_counts_to_df(counts, labels), hide_index=True, use_container_width=True)
 
 
@@ -259,39 +342,70 @@ def _render_distribution_quality_block(metrics: dict) -> None:
     dq = metrics.get("distribution_quality")
     if not isinstance(dq, dict):
         return
-    st.subheader("Hold-out distribution match (simulated vs Part D pseudo)")
+    st.subheader("Hold-out distribution match (simulated vs Medicare-derived pseudo marginals)")
     pillar = dq.get("pillar", "")
-    st.caption(
-        (f"**Eval intent:** {pillar} " if pillar else "")
-        + "**Business translation:** low JS means the **shape of simulated forward answers** is close to the "
-        "**shape implied by later Medicare rows** (same cohort)—a cohort-level plausibility check, not human "
-        "validation."
+    pillar_html = (
+        f"<p><strong>Evaluation intent (technical).</strong> {html.escape(str(pillar))}</p>" if pillar else ""
+    )
+    _callout_md(
+        pillar_html
+        + "<p><strong>What this is.</strong> Compares the <em>distribution</em> of simulated forward-looking answers to "
+        "a pseudo distribution implied by later Medicare Part D fields for the same cohort (a “pseudo marginal,” "
+        "built with rules—not a human-labeled survey).</p>"
+        "<p><strong>How to read the metrics.</strong> "
+        "<strong>Jensen–Shannon divergence</strong> (often abbreviated JS) measures how different two distributions "
+        "are; smaller values mean closer shape match. "
+        "<strong>Total variation distance</strong> (often abbreviated TV) is another standard distribution distance; "
+        "smaller values also mean closer match.</p>"
+        "<p><strong>Why it matters.</strong> This is a cohort-level plausibility check: if shapes diverge sharply, "
+        "workshop outputs may be misaligned with what the claims data would suggest—without replacing human validation."
+        "</p>"
     )
     c1, c2 = st.columns(2)
     mjs = dq.get("mean_js_sim_vs_holdout")
     mtv = dq.get("mean_tv_sim_vs_holdout")
-    c1.metric("Avg JS vs hold-out pseudo marginals", f"{mjs:.4f}" if mjs is not None else "—")
-    c2.metric("Avg TV vs hold-out pseudo marginals", f"{mtv:.4f}" if mtv is not None else "—")
+    c1.metric(
+        "Mean Jensen–Shannon vs hold-out pseudo",
+        f"{mjs:.4f}" if mjs is not None else "—",
+        help="Jensen–Shannon divergence versus hold-out pseudo marginals (0 = identical shape).",
+    )
+    c2.metric(
+        "Mean total variation vs hold-out pseudo",
+        f"{mtv:.4f}" if mtv is not None else "—",
+        help="Total variation distance versus hold-out pseudo marginals (0 = identical).",
+    )
 
 
 def _render_behavioral_alignment_block(metrics: dict) -> None:
     ba = metrics.get("behavioral_alignment")
     if not isinstance(ba, dict) or not ba.get("per_question"):
         st.subheader("Hold-out alignment (June 2022 forward vs later Part D)")
-        st.info("No `behavioral_alignment` in this metrics file—usually the cohort TSV was missing when "
-                "`eval.run_eval` ran, or the bundle is a placeholder.")
+        st.info(
+            "This metrics file has no behavioral-alignment block. That usually means the cohort tab-separated file "
+            "(`tirzepatide_simulation_cohort_100.tsv`) was missing when evaluation ran, or the bundle is a placeholder."
+        )
         return
     st.subheader("Hold-out alignment (June 2022 forward vs later Part D)")
-    note = ba.get("note", "")
-    rules_v = ba.get("rules_version", "")
-    st.caption(
-        "**What this is:** per-item **exact match rate** between **simulated** picks (``method_a`` stream) and "
-        f"**pseudo-labels** built from **post-2022** cohort columns (rules **{rules_v}**). {note} "
-        "**Why it matters:** tests whether **forward workshop answers** line up with **later administrative "
-        "outcomes** for the same doctors—**associational**, Part D–scoped."
+    note = str(ba.get("note", "") or "").strip()
+    rules_raw = str(ba.get("rules_version", "") or "").strip()
+    rules_v = html.escape(rules_raw)
+    rules_clause = f" using rules version <code>{rules_v}</code>" if rules_raw else ""
+    note_html = f"<p><strong>Technical note.</strong> {html.escape(note)}</p>" if note else ""
+    _callout_md(
+        "<p><strong>What this is.</strong> For each survey item, the <strong>exact match rate</strong> compares "
+        "simulated choices from the primary <code>method_a</code> stream to <strong>pseudo-labels</strong> derived "
+        f"from post-2022 cohort columns{rules_clause}.</p>"
+        f"{note_html}"
+        "<p><strong>Why it matters.</strong> It tests whether forward-looking workshop answers line up with later "
+        "Medicare Part D–based outcomes for the same National Provider Identifiers (NPIs). This is "
+        "<strong>associational</strong> and Part D–scoped—not causal evidence that messaging changed prescribing.</p>"
     )
     m_acc = ba.get("mean_accuracy_over_labeled_questions")
-    st.metric("Average match rate across labeled items", f"{m_acc:.3f}" if m_acc is not None else "—")
+    st.metric(
+        "Average match rate across labeled survey items",
+        f"{m_acc:.3f}" if m_acc is not None else "—",
+        help="Share of simulated answers that exactly match pseudo-labels built from later claims fields.",
+    )
     rows = []
     for qid, v in ba["per_question"].items():
         rows.append(
@@ -299,17 +413,17 @@ def _render_behavioral_alignment_block(metrics: dict) -> None:
                 "Survey item": _question_short_title(qid),
                 "Labeled doctor-answers": v.get("n_labeled"),
                 "Match rate": None if v.get("accuracy") is None else round(float(v["accuracy"]), 4),
-                "Shape gap vs hints (JS)": None
+                "Jensen–Shannon shape gap vs claims hints": None
                 if v.get("js_divergence_marginal") is None
                 else round(float(v["js_divergence_marginal"]), 4),
-                "Max shift vs hints (TV)": None
+                "Total variation vs claims hints": None
                 if v.get("tv_distance_marginal") is None
                 else round(float(v["tv_distance_marginal"]), 4),
             }
         )
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
     with st.expander("Technical: predicted vs pseudo-label counts (per item)"):
-        st.caption("Use for debugging segment skew—not for executive readouts.")
+        st.caption("For debugging segment skew and rule behavior—not intended as an executive readout.")
         for qid, v in ba["per_question"].items():
             st.markdown(f"**{_question_short_title(qid)}** (`{qid}`)")
             c1, c2 = st.columns(2)
@@ -327,11 +441,19 @@ def _render_persona_coherence_block(metrics: dict) -> None:
     if not isinstance(pc, dict):
         return
     st.subheader("Persona coherence (cross-item rules)")
-    st.caption(
-        f"**What this is:** cheap **logic checks** across answers for the same simulated doctor (rules "
-        f"`{pc.get('rules_version', '')}`). {pc.get('note', '')} "
-        "**Why it matters:** even if marginals look fine, **internally inconsistent stories** read as “bad bots” to "
-        "medical reviewers and undermine workshop trust."
+    rules_raw = str(pc.get("rules_version", "") or "").strip()
+    rules_v = html.escape(rules_raw)
+    rules_clause = f" (rules version <code>{rules_v}</code>)" if rules_raw else ""
+    note = str(pc.get("note", "") or "").strip()
+    note_html = f"<p><strong>Technical note.</strong> {html.escape(note)}</p>" if note else ""
+    _callout_md(
+        "<p><strong>What this is.</strong> Automated consistency checks across answers for the same simulated "
+        f"physician, using cross-item rules{rules_clause}. These are pragmatic "
+        "quality gates—not a measure of real clinical cognition.</p>"
+        f"{note_html}"
+        "<p><strong>Why it matters.</strong> Even when headline distributions look acceptable, contradictory "
+        "narratives can read as low-quality automation to medical reviewers and can reduce confidence in workshop "
+        "outputs.</p>"
     )
     n_blocks = pc.get("n_method_blocks_checked")
     n_viol = pc.get("n_violations")
@@ -350,27 +472,28 @@ def _render_instrument_health_block(metrics: dict) -> None:
     ih = metrics.get("instrument_health")
     if not isinstance(ih, dict):
         return
-    st.subheader("Run & instrument health")
-    st.caption(
-        "**What this is:** **pipeline QA**—parse coverage, missing cells, API errors, latency—straight from the "
-        "response JSONL. **Why it matters:** before you interpret hold-out charts, confirm the run was **complete** "
-        "and not dominated by parse errors."
+    st.subheader("Run and instrument health")
+    _callout_md(
+        "<p><strong>What this is.</strong> Pipeline quality assurance: parse coverage, missing answer cells, "
+        "API errors, and latency, summarized from the newline-delimited JSON responses file (JSON Lines / JSONL).</p>"
+        "<p><strong>Why it matters.</strong> Before interpreting hold-out alignment charts, confirm the simulation "
+        "run completed cleanly and was not dominated by parsing failures or missing data.</p>"
     )
     lat = ih.get("latency_ms") or {}
     summary_rows = [
         {"Metric": "Survey rows in file", "Value": ih.get("n_jsonl_rows")},
-        {"Metric": "v2 (one row per doctor) rows", "Value": ih.get("n_v2_rows")},
+        {"Metric": "Schema v2 rows (one row per doctor)", "Value": ih.get("n_v2_rows")},
         {"Metric": "Legacy flat rows", "Value": ih.get("n_legacy_rows")},
         {"Metric": "Flattened answer cells", "Value": ih.get("n_flat_cells")},
         {"Metric": "Cells with errors", "Value": ih.get("flat_cells_with_error")},
         {"Metric": "Cells missing a chosen option", "Value": ih.get("flat_cells_missing_option")},
-        {"Metric": "v2 missing per-question cells", "Value": ih.get("v2_missing_question_cells")},
-        {"Metric": "v2 survey-level API/parse errors", "Value": ih.get("v2_survey_level_errors")},
-        {"Metric": "LLM calls with latency logged", "Value": lat.get("n_calls_with_latency")},
+        {"Metric": "Schema v2 missing per-question cells", "Value": ih.get("v2_missing_question_cells")},
+        {"Metric": "Schema v2 survey-level API or parse errors", "Value": ih.get("v2_survey_level_errors")},
+        {"Metric": "Large language model (LLM) calls with latency logged", "Value": lat.get("n_calls_with_latency")},
         {"Metric": "Mean latency (ms)", "Value": None if lat.get("mean") is None else round(float(lat["mean"]), 1)},
         {"Metric": "Median latency (ms)", "Value": lat.get("p50")},
         {"Metric": "Max latency (ms)", "Value": lat.get("max")},
-        {"Metric": "Question ↔ claims map (YAML)", "Value": ih.get("claims_map_file")},
+        {"Metric": "Question-to-claims map file (YAML)", "Value": ih.get("claims_map_file")},
     ]
     st.dataframe(pd.DataFrame(summary_rows), hide_index=True, use_container_width=True)
     sn = ih.get("schema_notes")
@@ -382,7 +505,9 @@ def _render_instrument_health_block(metrics: dict) -> None:
 def _render_eval_coverage_sidebar(metrics: dict) -> None:
     """Confirm each eval bundle section is present (parity with eval.metrics.compute_metrics_bundle)."""
     with st.expander("Eval bundle coverage (what this file contains)"):
-        st.caption("Each row ties to **`eval/metrics.py` → `compute_metrics_bundle`**.")
+        _muted_md(
+            "Each row mirrors a block emitted by <code>compute_metrics_bundle</code> in <code>eval/metrics.py</code>."
+        )
         rows = [
             {
                 "Block": "survey_marginals",
@@ -410,10 +535,14 @@ def _render_eval_coverage_sidebar(metrics: dict) -> None:
 def main() -> None:
     load_local_dotenv(override=False)
     st.set_page_config(page_title="Tirzepatide Adoption Simulation", layout="wide")
+    _inject_page_styles()
 
     with st.sidebar:
-        st.header("LLM smoke re-run")
-        st.caption("Session-only; not saved. Used when you trigger Advanced → live API re-run.")
+        st.header("Optional live model smoke test")
+        st.caption(
+            "Runs only if you use **Advanced → Re-run with live API**. Settings apply to this browser session only "
+            "and are not saved."
+        )
         smoke_provider = st.selectbox(
             "LLM provider",
             ["together", "openai"],
@@ -435,25 +564,31 @@ def main() -> None:
     summary = _load_json(SUMMARY_PATH)
 
     st.title("Tirzepatide adoption simulation")
-    st.caption("Novo's 6-week decision problem (June 2022) — Medicare Part D–scoped physician POC")
+    st.caption(
+        "Novo Nordisk-style six-week decision framing (June 2022) — Medicare Part D–scoped physician proof of "
+        "concept (POC)."
+    )
 
     cohort_df = _read_cohort_tsv()
 
     st.header("About")
     st.markdown(
         """
-        **Problem.** At GLP-1 launch speed, brand teams need **segment- and geography-aware**
-        hypotheses faster than traditional surveys—while staying **anchored to observed prescribing**.
+        **Problem.** At GLP-1 launch speed, brand teams often need **segment- and geography-aware** hypotheses
+        faster than traditional surveys—while staying **anchored to observed prescribing** in administrative data.
 
-        **Cohort.** ~100 physicians (after filters) in **six priority metros**, **Endocrinology /
-        Internal Medicine / Family Medicine only**, with **2022→2023 Part D** linked for **revealed**
-        tirzepatide/GLP-1 patterns. See `docs/target_report.md` for scope conditions.
+        **Cohort.** About 100 physicians (after filters) in **six priority metros**, **Endocrinology / Internal Medicine /
+        Family Medicine only**, with **Medicare Part D** data linked from **calendar year (CY) 2022** into **2023** so
+        we can attach **revealed** tirzepatide and GLP-1 patterns after the survey information set. Full scope
+        conditions are documented in `docs/target_report.md`.
 
-        **Persona & eval.** Default **`production`** persona = **Medicare Part D + Open Payments through CY2022**
-        (no 2023 outcomes in the prompt; no 2022 tirzepatide yes/no line). The survey asks **June 2022 forward**
-        judgments; **eval** compares answers to **pseudo-labels from later Part D fields** in the cohort TSV
-        (hold-out style). **Coherence** and **instrument health** are QA layers; revealed adoption chart is
-        **descriptive only** (not causal).
+        **Persona and evaluation.** The default **`production`** persona combines **Medicare Part D** utilization
+        with **CMS Open Payments** through **CY2022** (no 2023 outcomes inside the prompt; no explicit 2022
+        tirzepatide yes/no field). The survey elicits **June-2022-forward** judgments. **Evaluation** compares those
+        answers to **pseudo-labels** inferred from **later Part D fields** in the cohort tab-separated values (TSV)
+        file— a hold-out style check at the cohort level. **Persona coherence** and **instrument health** are
+        **quality assurance (QA)** layers on top of that. The **revealed adoption** chart is **descriptive only** and
+        is **not** a causal estimate of promotional impact.
         """
     )
 
@@ -461,18 +596,32 @@ def main() -> None:
     _render_sample_description(cohort_df)
 
     if summary.get("offline_seed"):
-        st.warning(
-            "Demo bundle uses **offline deterministic seed** data (`--offline-seed-demo`), not real LLM calls. "
-            "Run `python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle` with "
-            "`TOGETHER_API_KEY` (or `--provider openai` and `OPENAI_API_KEY`) for authentic responses."
+        st.info(
+            "You are viewing the **packaged offline demo**: responses were generated with a **fixed deterministic "
+            "seed** so the story is repeatable. **No live large language model (LLM) API calls** are made for this "
+            "bundle."
         )
+        with st.expander("Developers: regenerate with a live model or refresh the demo bundle"):
+            st.markdown(
+                "Run the batch module with a provider API key, then rebuild metrics. Example command (copy into "
+                "your terminal from the project root):"
+            )
+            st.code("python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle", language="bash")
+            st.markdown(
+                "- Set **`TOGETHER_API_KEY`** for the default Together provider, **or**  \n"
+                "- Use **`--provider openai`** with **`OPENAI_API_KEY`** for OpenAI-compatible endpoints."
+            )
     elif summary.get("is_placeholder"):
         st.info(
-            "Demo bundle is a **placeholder**. Run `python -m simulation.run_batch "
-            "--limit-npis 10 --save-as-demo-bundle` with `TOGETHER_API_KEY` set (default provider), "
-            "or `--provider openai` with `OPENAI_API_KEY`, "
-            "or use `--offline-seed-demo` if you only need a runnable pipeline without an API."
+            "The demo bundle on disk is still a **placeholder** (no finalized survey output). Generate a real bundle "
+            "with a model API key, or use the offline seed flag if you only need a runnable pipeline."
         )
+        with st.expander("Developers: commands to build a real or offline demo bundle"):
+            st.code("python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle", language="bash")
+            st.markdown(
+                "Use **`TOGETHER_API_KEY`** with the default provider, **`--provider openai`** with "
+                "**`OPENAI_API_KEY`**, or **`--offline-seed-demo`** for a deterministic run without an API."
+            )
 
     st.header("Results")
     metrics_options = _discover_metrics_files()
@@ -496,9 +645,11 @@ def main() -> None:
         )
         _, metrics_path_used = metrics_options[pick]
         metrics = _load_json(metrics_path_used)
-        st.caption(
-            f"**Loaded file:** `{metrics_path_used.relative_to(PROJECT_ROOT)}` — **what / why:** pick which "
-            "frozen eval bundle you are presenting (e.g. latest smoke test vs checked-in demo)."
+        rel = html.escape(str(metrics_path_used.relative_to(PROJECT_ROOT)))
+        _muted_md(
+            f"<strong>Loaded metrics file:</strong> <code>{rel}</code><br/>"
+            "<strong>Why this control exists.</strong> Choose which saved evaluation snapshot you are presenting—for "
+            "example, the checked-in demo versus a local smoke run."
         )
 
     _render_eval_coverage_sidebar(metrics)
@@ -510,10 +661,13 @@ def main() -> None:
         )
 
     st.subheader("Executive snapshot")
-    st.caption(
-        "**What this row is:** run size, **hold-out shape gap** (JS vs Medicare pseudo marginals), **per-item exact "
-        "match** to hold-out labels, **coherence** violations, and **missing cells**. **Why:** quick read on "
-        "**scenario credibility vs later Part D** plus pipeline health."
+    _callout_md(
+        "<p><strong>What this row summarizes.</strong> Run size; average <strong>Jensen–Shannon</strong> shape gap "
+        "between simulated answers and Medicare-derived pseudo marginals; average <strong>exact match rate</strong> "
+        "to pseudo-labels built from later Part D fields; <strong>persona coherence</strong> violation rate; and "
+        "missing simulated answer cells from instrument health.</p>"
+        "<p><strong>Why it matters.</strong> A fast credibility check: are workshop outputs broadly compatible with "
+        "later administrative outcomes for the same cohort, and was the underlying run technically healthy?</p>"
     )
     dq = metrics.get("distribution_quality") if metrics else {}
     ba = metrics.get("behavioral_alignment") if metrics else {}
@@ -527,37 +681,63 @@ def main() -> None:
 
     e1, e2, e3, e4, e5 = st.columns(5)
     e1.metric("Doctors in demo summary", summary.get("n_npis", "—"))
-    e2.metric("Survey items in battery", summary.get("n_questions", "—"))
-    e3.metric("Avg JS vs hold-out pseudo", f"{mjs:.4f}" if mjs is not None else "—")
-    e4.metric("Avg match vs claims hints", f"{m_acc:.3f}" if m_acc is not None else "—")
-    e5.metric("Coherence violation rate", f"{vr:.3f}" if vr is not None else "—")
+    e2.metric(
+        "Survey items in battery",
+        summary.get("n_questions", "—"),
+        help="Count of forward-looking survey items in the battery for this run.",
+    )
+    e3.metric(
+        "Mean Jensen–Shannon vs hold-out pseudo",
+        f"{mjs:.4f}" if mjs is not None else "—",
+        help="Mean Jensen–Shannon divergence between simulated distributions and hold-out pseudo marginals.",
+    )
+    e4.metric(
+        "Mean exact match vs claims-based hints",
+        f"{m_acc:.3f}" if m_acc is not None else "—",
+        help="Average per-item exact agreement between simulated answers and pseudo-labels from later Part D fields.",
+    )
+    e5.metric(
+        "Coherence violation rate",
+        f"{vr:.3f}" if vr is not None else "—",
+        help="Cross-item rule violations per simulated physician block (see Persona coherence section).",
+    )
     if miss is not None:
-        st.metric("Missing answer cells (run health)", int(miss))
+        st.metric(
+            "Missing answer cells (instrument health)",
+            int(miss),
+            help="Simulated answer cells without a chosen option—signals incomplete or failed parsing.",
+        )
 
     rm = metrics.get("run_manifest")
     if isinstance(rm, dict) and rm:
         with st.expander("Run configuration (pinned batch settings)"):
-            st.caption(
-                "**What / why:** exact CLI/model/cohort choices for **reproducibility**—attach to any screenshot "
-                "shared internally."
+            _muted_md(
+                "<strong>What this is.</strong> Exact command-line, model, and cohort choices used to produce the "
+                "bundle.<br/><strong>Why it matters.</strong> Attach to screenshots for reproducible internal review."
             )
             st.json(rm)
 
     em = metrics.get("eval_meta")
     if isinstance(em, dict) and em:
         with st.expander("Eval build metadata"):
-            st.caption("**What / why:** which responses path and cohort were used when `run_eval` produced this JSON.")
+            _muted_md(
+                "<strong>What this is.</strong> Paths and options used when <code>python -m eval.run_eval</code> "
+                "built this metrics file.<br/><strong>Why it matters.</strong> Confirms which response file and "
+                "cohort snapshot the numbers refer to."
+            )
             st.json(em)
 
     st.markdown("---")
     actual = summary.get("adoption_by_archetype_actual") or _cohort_adoption_by_archetype(cohort_df)
     if actual:
         st.subheader("Revealed adoption by segment tag (Medicare Part D 2023)")
-        st.caption(
-            "**What this chart is:** among doctors in the cohort, the **share with any tirzepatide** visible in "
-            "**Part D 2023**, broken out by **adoption-style tag** from 2022 data. **Why it matters:** it is the "
-            "**empirical baseline** you might compare to **simulated** early-launch posture—**descriptive only**, "
-            "not proof that messaging caused prescribing."
+        _callout_md(
+            "<p><strong>What this chart is.</strong> Among physicians in the cohort, the share with "
+            "<strong>any tirzepatide</strong> (brand example: Mounjaro) visible in <strong>Medicare Part D claims for "
+            "2023</strong>, broken out by <strong>adoption-style tags</strong> derived from 2022 prescribing.</p>"
+            "<p><strong>Why it matters.</strong> It is an <strong>empirical baseline</strong> you can compare to "
+            "simulated June-2022-forward posture. The comparison is <strong>descriptive and associational</strong>—"
+            "not evidence that messaging or sampling caused prescribing changes.</p>"
         )
         archetypes = list(actual.keys())
         archetypes_pretty = [_pretty_archetype(a) for a in archetypes]
@@ -577,7 +757,10 @@ def main() -> None:
             yaxis_title="Share of doctors in segment",
             xaxis_title="Adoption-style tag (from 2022 prescribing)",
             template="plotly_white",
-            height=400,
+            height=440,
+            margin=dict(l=60, r=40, t=70, b=120),
+            xaxis=dict(tickangle=-28, automargin=True),
+            yaxis=dict(automargin=True, range=[0, 1.05]),
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
@@ -590,10 +773,12 @@ def main() -> None:
     _render_instrument_health_block(metrics)
 
     st.header("Reasoning examples")
-    st.caption(
-        "**What this is:** a few **verbatim rationales** pulled from flattened `sample_responses.jsonl`. "
-        "**Why it matters:** executives often trust **one believable quote** more than a wall of metrics—use to "
-        "illustrate *how* the model is arguing, not as evidence of real physician speech."
+    _callout_md(
+        "<p><strong>What this is.</strong> A handful of <strong>verbatim rationales</strong> excerpted from the "
+        "flattened demonstration responses file <code>sample_responses.jsonl</code>.</p>"
+        "<p><strong>Why it matters.</strong> Stakeholders often calibrate trust from a single plausible narrative "
+        "more than from tables alone. Treat quotes as illustrations of <em>how the model reasons</em>, not as "
+        "recordings of real clinician speech.</p>"
     )
     lines: list[str] = []
     if SAMPLE_JSONL.is_file():
@@ -674,12 +859,15 @@ def main() -> None:
         if repo_hint
         else "Repository: set `DEMO_REPO_URL` in the environment to show a link here (optional)."
     )
-    st.caption(
-        f"{repo_line} Setup: `pip install -r requirements.txt` then `streamlit run streamlit_app.py` "
-        "or `make demo`. **Keys:** `TOGETHER_API_KEY` for the default Together SDK, or `--provider openai` with "
-        "`OPENAI_API_KEY` (optional `--base-url`; see `.env.example`). **Limitations:** Medicare Part D only; "
-        "annual files; "
-        "purposive cohort—not a national probability sample."
+    _muted_md(
+        f"{html.escape(repo_line)}<br/><br/>"
+        "<strong>Local setup (developers).</strong> "
+        "<code>pip install -r requirements.txt</code>, then <code>streamlit run streamlit_app.py</code> or "
+        "<code>make demo</code>. "
+        "Environment variables: <code>TOGETHER_API_KEY</code> for the default Together SDK, or OpenAI-compatible "
+        "credentials with <code>--provider openai</code> (see <code>.env.example</code>).<br/><br/>"
+        "<strong>Limitations.</strong> Medicare Part D only; annual files; purposive cohort—not a national "
+        "probability sample."
     )
 
 
