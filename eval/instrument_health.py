@@ -82,6 +82,13 @@ def compute_instrument_health(
     )
     flat_cells_missing_option = missing_cells + legacy_flat_missing
 
+    v2_expected_answer_cells = n_v2 * len(qids)
+    missing_answer_cell_rate: float | None
+    if v2_expected_answer_cells > 0:
+        missing_answer_cell_rate = missing_cells / float(v2_expected_answer_cells)
+    else:
+        missing_answer_cell_rate = None
+
     return {
         "schema_notes": "v2 rows carry latency_ms_by_method and survey_error_by_method; "
         "legacy rows are flat only.",
@@ -92,6 +99,8 @@ def compute_instrument_health(
         "flat_cells_with_error": flat_with_error,
         "flat_cells_missing_option": flat_cells_missing_option,
         "v2_missing_question_cells": missing_cells,
+        "v2_expected_answer_cells": v2_expected_answer_cells,
+        "missing_answer_cell_rate": missing_answer_cell_rate,
         "v2_survey_level_errors": survey_errors,
         "latency_ms": {
             "n_calls_with_latency": len(latencies),

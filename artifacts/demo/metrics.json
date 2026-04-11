@@ -55,6 +55,8 @@
     "flat_cells_with_error": 0,
     "flat_cells_missing_option": 150,
     "v2_missing_question_cells": 150,
+    "v2_expected_answer_cells": 600,
+    "missing_answer_cell_rate": 0.25,
     "v2_survey_level_errors": 25,
     "latency_ms": {
       "n_calls_with_latency": 100,

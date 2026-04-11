@@ -66,6 +66,8 @@ class TestEvalExtensions(unittest.TestCase):
             h = compute_instrument_health(p, questions_yaml=qpath)
             self.assertEqual(h["n_v2_rows"], 1)
             self.assertEqual(h["latency_ms"]["n_calls_with_latency"], 1)
+            self.assertEqual(h["v2_expected_answer_cells"], 1)
+            self.assertEqual(h["missing_answer_cell_rate"], 0.0)
 
     def test_instrument_health_v2_empty_block_counts_missing(self) -> None:
         """Failed joint survey (empty ``method_a``) must count all questions as missing."""
@@ -88,6 +90,8 @@ class TestEvalExtensions(unittest.TestCase):
             )
             h = compute_instrument_health(p, questions_yaml=qpath)
             self.assertEqual(h["v2_missing_question_cells"], 2)
+            self.assertEqual(h["v2_expected_answer_cells"], 2)
+            self.assertEqual(h["missing_answer_cell_rate"], 1.0)
             self.assertEqual(h["flat_cells_missing_option"], 2)
 
     def test_compute_persona_coherence_empty(self) -> None:
@@ -114,6 +118,8 @@ class TestEvalExtensions(unittest.TestCase):
             self.assertEqual(h["n_v2_rows"], 1)
             self.assertEqual(h["latency_ms"]["n_calls_with_latency"], 1)
             self.assertEqual(h["v2_missing_question_cells"], 0)
+            self.assertEqual(h["v2_expected_answer_cells"], 1)
+            self.assertEqual(h["missing_answer_cell_rate"], 0.0)
 
 
 if __name__ == "__main__":

@@ -527,7 +527,7 @@ def _render_executive_snapshot(summary: dict, metrics: dict) -> None:
         "<p><strong>What this row summarizes.</strong> Run size; average <strong>Jensen–Shannon</strong> shape gap "
         "between simulated answers and Medicare-derived pseudo marginals; average <strong>exact match rate</strong> "
         "to pseudo-labels built from later Part D fields; <strong>persona coherence</strong> violation rate; and "
-        "missing simulated answer cells from instrument health.</p>"
+        "missing share of expected survey answers from instrument health.</p>"
         "<p><strong>Why it matters.</strong> A fast credibility check: are workshop outputs broadly compatible with "
         "later administrative outcomes for the same cohort, and was the underlying run technically healthy?</p>"
     )
@@ -539,7 +539,21 @@ def _render_executive_snapshot(summary: dict, metrics: dict) -> None:
     mjs = dq.get("mean_js_sim_vs_holdout") if isinstance(dq, dict) else None
     m_acc = ba.get("mean_accuracy_over_labeled_questions") if isinstance(ba, dict) else None
     vr = pc.get("violation_rate_per_method_block") if isinstance(pc, dict) else None
-    miss = ih.get("flat_cells_missing_option") if isinstance(ih, dict) else None
+    miss_rate = ih.get("missing_answer_cell_rate") if isinstance(ih, dict) else None
+    miss_cells = ih.get("v2_missing_question_cells") if isinstance(ih, dict) else None
+    miss_expected = ih.get("v2_expected_answer_cells") if isinstance(ih, dict) else None
+    if (
+        miss_rate is None
+        and isinstance(ih, dict)
+        and miss_cells is not None
+        and ih.get("n_v2_rows") is not None
+        and summary.get("n_questions")
+    ):
+        exp = int(ih["n_v2_rows"]) * int(summary["n_questions"])
+        if exp > 0:
+            miss_rate = float(miss_cells) / float(exp)
+            if miss_expected is None:
+                miss_expected = exp
 
     e1, e2, e3, e4, e5 = st.columns(5)
     e1.metric("Doctors in demo summary", summary.get("n_npis", "—"))
@@ -563,12 +577,20 @@ def _render_executive_snapshot(summary: dict, metrics: dict) -> None:
         f"{vr:.3f}" if vr is not None else "—",
         help="Cross-item rule violations per simulated physician block (see Persona coherence section).",
     )
-    if miss is not None:
+    if miss_rate is not None:
+        raw = ""
+        if miss_cells is not None and miss_expected is not None:
+            raw = f" Raw counts: {miss_cells} / {miss_expected} cells."
         st.metric(
-            "Missing answer cells (instrument health)",
-            int(miss),
-            help="Expected v2 survey cells (doctors × survey items) minus cells with a parsed option_id; includes "
-            "failed joint calls where method_a is empty—signals truncation, parse errors, or empty model content.",
+            "Missing answers (instrument health)",
+            f"{float(miss_rate):.1%}",
+            help=(
+                "Share of expected v2 survey cells (doctors × survey items in the battery) without a parsed "
+                "option_id."
+                + raw
+                + " Includes failed joint calls where `method_a` is empty (truncation, parse errors, or empty model "
+                "content)."
+            ),
         )
 
 
@@ -807,8 +829,15 @@ def _render_instrument_health_block(metrics: dict) -> None:
         {"Metric": "Legacy flat rows", "Value": ih.get("n_legacy_rows")},
         {"Metric": "Flattened answer cells", "Value": ih.get("n_flat_cells")},
         {"Metric": "Cells with errors", "Value": ih.get("flat_cells_with_error")},
-        {"Metric": "Cells missing a chosen option", "Value": ih.get("flat_cells_missing_option")},
+        {
+            "Metric": "Missing answer share (v2 expected cells)",
+            "Value": None
+            if ih.get("missing_answer_cell_rate") is None
+            else f"{float(ih['missing_answer_cell_rate']):.1%}",
+        },
+        {"Metric": "Cells missing a chosen option (count)", "Value": ih.get("flat_cells_missing_option")},
         {"Metric": "Schema v2 missing per-question cells", "Value": ih.get("v2_missing_question_cells")},
+        {"Metric": "Schema v2 expected answer cells", "Value": ih.get("v2_expected_answer_cells")},
         {"Metric": "Schema v2 survey-level API or parse errors", "Value": ih.get("v2_survey_level_errors")},
         {"Metric": "Large language model (LLM) calls with latency logged", "Value": lat.get("n_calls_with_latency")},
         {"Metric": "Mean latency (ms)", "Value": None if lat.get("mean") is None else round(float(lat["mean"]), 1)},
