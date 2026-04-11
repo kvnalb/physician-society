@@ -6,19 +6,24 @@ import argparse
 import hashlib
 import json
 import os
+import threading
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, DefaultDict, Dict, List, Optional, Set
+from typing import Any, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
 from simulation.llm_client import call_llm, get_api_key, make_client
-from simulation.persona_methods import build_prompts
+from simulation.persona_methods import PROMPT_VERSION, build_prompts_for_persona_variant
 from simulation.questions_io import Question, load_questions
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RUNS_ROOT = PROJECT_ROOT / "data" / "output" / "runs"
 DEFAULT_COHORT = PROJECT_ROOT / "data" / "output" / "tirzepatide_simulation_cohort_100.tsv"
+
+_cache_lock = threading.Lock()
 
 
 def _synthetic_response_rows(
@@ -49,6 +54,9 @@ def _synthetic_response_rows(
                         "method": f"method_{letter}",
                         "model": model,
                         "temperature": temperature,
+                        "persona_variant": "offline_seed",
+                        "run_id": None,
+                        "prompt_version": PROMPT_VERSION,
                         "raw": "",
                         "parsed_option": parsed,
                         "reasoning": "Offline deterministic seed (no LLM call).",
@@ -66,6 +74,8 @@ def run_offline_seed_demo(
     cohort_path: Path,
     output_dir: Path,
     limit_npis: Optional[int],
+    write_demo_bundle: bool,
+    run_id: Optional[str],
 ) -> int:
     questions = load_questions()
     if not cohort_path.is_file():
@@ -86,19 +96,35 @@ def run_offline_seed_demo(
         for r in rows_out:
             fh.write(json.dumps(r) + "\n")
     print(f"Wrote {jsonl_path.relative_to(PROJECT_ROOT)} (offline seed, n={len(rows_out)} rows).")
-    _write_demo_bundle(
-        rows_out=rows_out,
-        cohort_df=df,
-        questions=questions,
-        methods=["A", "B"],
+    _write_run_manifest(
+        output_dir=output_dir,
+        run_id=run_id,
+        persona_variant="offline_seed",
         model=model,
+        temperature=temperature,
+        methods=["A", "B"],
+        questions_spec="all",
+        concurrency=1,
+        limit_npis=limit_npis,
+        n_npis=len(df),
+        cohort_path=cohort_path,
+        base_url_set=False,
+        offline=True,
     )
-    demo_summary_path = PROJECT_ROOT / "artifacts" / "demo" / "summary.json"
-    data = json.loads(demo_summary_path.read_text(encoding="utf-8"))
-    data["is_placeholder"] = False
-    data["offline_seed"] = True
-    demo_summary_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    print("Updated artifacts/demo/summary.json (offline seed, not real LLM output).")
+    if write_demo_bundle:
+        _write_demo_bundle(
+            rows_out=rows_out,
+            cohort_df=df,
+            questions=questions,
+            methods=["A", "B"],
+            model=model,
+        )
+        demo_summary_path = PROJECT_ROOT / "artifacts" / "demo" / "summary.json"
+        data = json.loads(demo_summary_path.read_text(encoding="utf-8"))
+        data["is_placeholder"] = False
+        data["offline_seed"] = True
+        demo_summary_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        print("Updated artifacts/demo/summary.json (offline seed, not real LLM output).")
     return 0
 
 
@@ -109,9 +135,12 @@ def _cache_key(
     method: str,
     question_id: str,
     npi: str,
+    persona_variant: str,
+    prompt_version: str,
 ) -> str:
     h = hashlib.sha256(
-        f"{model}|{temperature}|{method}|{question_id}|{npi}".encode()
+        f"{prompt_version}|{persona_variant}|{model}|{temperature}|{method}|"
+        f"{question_id}|{npi}".encode()
     ).hexdigest()[:32]
     return h
 
@@ -130,6 +159,49 @@ def _read_cache(cache_dir: Path, key: str, max_age_hours: float = 24.0) -> Optio
         return None
 
 
+def _write_run_manifest(
+    *,
+    output_dir: Path,
+    run_id: Optional[str],
+    persona_variant: str,
+    model: str,
+    temperature: float,
+    methods: List[str],
+    questions_spec: str,
+    concurrency: int,
+    limit_npis: Optional[int],
+    n_npis: int,
+    cohort_path: Path,
+    base_url_set: bool,
+    offline: bool,
+) -> None:
+    """Snapshot run configuration next to responses.jsonl for reproducibility."""
+    try:
+        cohort_rel = str(cohort_path.resolve().relative_to(PROJECT_ROOT))
+    except ValueError:
+        cohort_rel = str(cohort_path)
+    manifest = {
+        "schema_version": 1,
+        "written_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "offline": offline,
+        "run_id": run_id,
+        "persona_variant": persona_variant,
+        "prompt_version": PROMPT_VERSION,
+        "model": model,
+        "temperature": temperature,
+        "methods": methods,
+        "questions_spec": questions_spec,
+        "concurrency": concurrency,
+        "limit_npis": limit_npis,
+        "n_npis_in_run": n_npis,
+        "cohort_path": cohort_rel,
+        "base_url_set": base_url_set,
+    }
+    p = output_dir / "run_manifest.json"
+    p.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    print(f"Wrote {p.relative_to(PROJECT_ROOT)}")
+
+
 def _write_cache(cache_dir: Path, key: str, payload: dict[str, Any]) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     p = cache_dir / f"{key}.json"
@@ -145,6 +217,98 @@ def _select_questions(all_q: List[Question], spec: str) -> List[Question]:
     return [q for q in all_q if q.question_id in ids]
 
 
+def _execute_one_llm_task(
+    *,
+    task_idx: int,
+    npi: str,
+    method: str,
+    q: Question,
+    rowd: dict[str, Any],
+    persona_variant: str,
+    run_id: Optional[str],
+    model: str,
+    temperature: float,
+    client: Any,
+    cache_dir: Path,
+) -> Tuple[int, dict[str, Any], bool, bool]:
+    """Returns (idx, row_dict, cache_hit, had_error)."""
+    ck = _cache_key(
+        model=model,
+        temperature=temperature,
+        method=method,
+        question_id=q.question_id,
+        npi=npi,
+        persona_variant=persona_variant,
+        prompt_version=PROMPT_VERSION,
+    )
+    with _cache_lock:
+        cached = _read_cache(cache_dir, ck)
+    if cached and cached.get("parsed_option"):
+        return (
+            task_idx,
+            {
+                "npi": npi,
+                "question_id": q.question_id,
+                "method": f"method_{method.lower()}",
+                "model": model,
+                "temperature": temperature,
+                "persona_variant": persona_variant,
+                "run_id": run_id,
+                "prompt_version": PROMPT_VERSION,
+                "raw": cached.get("raw", ""),
+                "parsed_option": cached.get("parsed_option"),
+                "reasoning": cached.get("reasoning", ""),
+                "latency_ms": int(cached.get("latency_ms", 0)),
+                "error": None,
+                "cache_hit": True,
+            },
+            True,
+            False,
+        )
+
+    system, user = build_prompts_for_persona_variant(persona_variant, method, rowd, q)
+    raw, parsed, reason, lat, err = call_llm(
+        client,
+        system=system,
+        user=user,
+        model=model,
+        temperature=temperature,
+        question=q,
+    )
+    had_error = bool(err)
+    if parsed:
+        payload = {
+            "raw": raw,
+            "parsed_option": parsed,
+            "reasoning": reason,
+            "latency_ms": lat,
+        }
+        with _cache_lock:
+            _write_cache(cache_dir, ck, payload)
+
+    return (
+        task_idx,
+        {
+            "npi": npi,
+            "question_id": q.question_id,
+            "method": f"method_{method.lower()}",
+            "model": model,
+            "temperature": temperature,
+            "persona_variant": persona_variant,
+            "run_id": run_id,
+            "prompt_version": PROMPT_VERSION,
+            "raw": raw,
+            "parsed_option": parsed,
+            "reasoning": reason,
+            "latency_ms": lat,
+            "error": err,
+            "cache_hit": False,
+        },
+        False,
+        had_error,
+    )
+
+
 def run(
     *,
     cohort_path: Path,
@@ -157,6 +321,9 @@ def run(
     base_url: Optional[str],
     api_key: Optional[str],
     save_demo_bundle: bool,
+    persona_variant: str,
+    concurrency: int,
+    run_id: Optional[str],
 ) -> int:
     questions = load_questions()
     qs = _select_questions(questions, questions_spec)
@@ -169,7 +336,7 @@ def run(
         print("Run scripts/06_tirzepatide_simulation_cohort.py first or pass --cohort-path.")
         return 1
 
-    df = pd.read_csv(cohort_path, sep="\t", low_memory=False)
+    df = pd.read_csv(cohort_path, sep="\t", low_memory=False, dtype={"npi": str})
     if limit_npis is not None:
         df = df.head(limit_npis)
 
@@ -183,79 +350,48 @@ def run(
     output_dir.mkdir(parents=True, exist_ok=True)
     jsonl_path = output_dir / "responses.jsonl"
 
-    rows_out: List[dict[str, Any]] = []
-    cache_hits = 0
-    errors = 0
-
+    work: List[Tuple[int, str, str, Question, dict[str, Any]]] = []
+    t = 0
     for _, row in df.iterrows():
         rowd = row.to_dict()
         npi = str(rowd.get("npi", ""))
         for method in methods:
             for q in qs:
-                ck = _cache_key(
-                    model=model,
-                    temperature=temperature,
-                    method=method,
-                    question_id=q.question_id,
-                    npi=npi,
-                )
-                cached = _read_cache(cache_dir, ck)
-                if cached and cached.get("parsed_option"):
-                    cache_hits += 1
-                    rows_out.append(
-                        {
-                            "npi": npi,
-                            "question_id": q.question_id,
-                            "method": f"method_{method.lower()}",
-                            "model": model,
-                            "temperature": temperature,
-                            "raw": cached.get("raw", ""),
-                            "parsed_option": cached.get("parsed_option"),
-                            "reasoning": cached.get("reasoning", ""),
-                            "latency_ms": int(cached.get("latency_ms", 0)),
-                            "error": None,
-                            "cache_hit": True,
-                        }
-                    )
-                    continue
+                work.append((t, npi, method, q, rowd))
+                t += 1
 
-                system, user = build_prompts(method, rowd, q)
-                raw, parsed, reason, lat, err = call_llm(
-                    client,
-                    system=system,
-                    user=user,
-                    model=model,
-                    temperature=temperature,
-                    question=q,
-                )
-                if err:
-                    errors += 1
-                if parsed:
-                    _write_cache(
-                        cache_dir,
-                        ck,
-                        {
-                            "raw": raw,
-                            "parsed_option": parsed,
-                            "reasoning": reason,
-                            "latency_ms": lat,
-                        },
-                    )
-                rows_out.append(
-                    {
-                        "npi": npi,
-                        "question_id": q.question_id,
-                        "method": f"method_{method.lower()}",
-                        "model": model,
-                        "temperature": temperature,
-                        "raw": raw,
-                        "parsed_option": parsed,
-                        "reasoning": reason,
-                        "latency_ms": lat,
-                        "error": err,
-                        "cache_hit": False,
-                    }
-                )
+    results: List[Optional[dict[str, Any]]] = [None] * len(work)
+    cache_hits = 0
+    errors = 0
+
+    def _submit(w: Tuple[int, str, str, Question, dict[str, Any]]) -> Tuple[int, dict[str, Any], bool, bool]:
+        idx, npi, method, q, rowd = w
+        return _execute_one_llm_task(
+            task_idx=idx,
+            npi=npi,
+            method=method,
+            q=q,
+            rowd=rowd,
+            persona_variant=persona_variant,
+            run_id=run_id,
+            model=model,
+            temperature=temperature,
+            client=client,
+            cache_dir=cache_dir,
+        )
+
+    n_workers = max(1, min(concurrency, len(work)))
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futures = [pool.submit(_submit, w) for w in work]
+        for fut in as_completed(futures):
+            idx, row_dict, hit, had_err = fut.result()
+            results[idx] = row_dict
+            if hit:
+                cache_hits += 1
+            if had_err:
+                errors += 1
+
+    rows_out = [r for r in results if r is not None]
 
     with open(jsonl_path, "w", encoding="utf-8") as fh:
         for r in rows_out:
@@ -264,7 +400,24 @@ def run(
     n_calls = len(rows_out)
     print(
         f"Wrote {jsonl_path.relative_to(PROJECT_ROOT)}: {n_calls} rows, "
-        f"{cache_hits} cache hits, {errors} errors."
+        f"{cache_hits} cache hits, {errors} rows with LLM errors, "
+        f"concurrency={n_workers}, persona_variant={persona_variant}, prompt_v={PROMPT_VERSION}."
+    )
+
+    _write_run_manifest(
+        output_dir=output_dir,
+        run_id=run_id,
+        persona_variant=persona_variant,
+        model=model,
+        temperature=temperature,
+        methods=methods,
+        questions_spec=questions_spec,
+        concurrency=n_workers,
+        limit_npis=limit_npis,
+        n_npis=len(df),
+        cohort_path=cohort_path,
+        base_url_set=bool(base_url),
+        offline=False,
     )
 
     if save_demo_bundle:
@@ -375,10 +528,29 @@ def _write_demo_bundle(
 def main() -> None:
     p = argparse.ArgumentParser(description="Run LLM survey batch over physician cohort.")
     p.add_argument("--cohort-path", type=Path, default=DEFAULT_COHORT)
-    p.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "data" / "output" / "runs" / "latest")
+    p.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Explicit output directory (overrides --run-id). Default: data/output/runs/<run-id>.",
+    )
+    p.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Subdirectory under data/output/runs/ (default: latest). E.g. v0_naive, v2_ab_rich.",
+    )
     p.add_argument("--limit-npis", type=int, default=None)
     p.add_argument("--questions", type=str, default="all", help="all or comma-separated question_ids")
     p.add_argument("--method", type=str, default="both", choices=["A", "B", "both"])
+    p.add_argument(
+        "--persona-variant",
+        type=str,
+        default="ab",
+        choices=["naive", "b", "a", "ab", "a_numeric"],
+        help="Prompting strategy: naive|b|a force single stream (method_a rows only); ab|a_numeric for A/B.",
+    )
+    p.add_argument("--concurrency", type=int, default=12, help="Parallel LLM calls (default 12).")
     p.add_argument("--model", type=str, default="gpt-4o-mini")
     p.add_argument("--temperature", type=float, default=0.2)
     p.add_argument("--base-url", type=str, default=None, help="Together or other OpenAI-compatible base URL")
@@ -392,18 +564,39 @@ def main() -> None:
         action="store_true",
         help="No API: deterministic A/B responses from cohort + questions (for CI / missing keys)",
     )
+    p.add_argument(
+        "--write-demo-bundle",
+        action="store_true",
+        help="With --offline-seed-demo, also refresh artifacts/demo/ (default: do not overwrite demo).",
+    )
     args = p.parse_args()
+
+    if args.output_dir is not None:
+        output_dir = args.output_dir
+    else:
+        output_dir = RUNS_ROOT / (args.run_id or "latest")
 
     if args.offline_seed_demo:
         raise SystemExit(
             run_offline_seed_demo(
                 cohort_path=args.cohort_path,
-                output_dir=args.output_dir,
+                output_dir=output_dir,
                 limit_npis=args.limit_npis,
+                write_demo_bundle=args.write_demo_bundle,
+                run_id=args.run_id,
             )
         )
 
-    methods = ["A", "B"] if args.method == "both" else [args.method]
+    pv = args.persona_variant.strip().lower()
+    if pv in ("naive", "b", "a"):
+        methods = ["A"]
+        if args.method != "A" and args.method != "both":
+            print("Note: naive/b/a variants emit a single stream labeled method_a; ignoring --method for list size.")
+    elif args.method == "both":
+        methods = ["A", "B"]
+    else:
+        methods = [args.method]
+
     key = get_api_key("openai")
     if args.base_url and os.environ.get("TOGETHER_API_KEY"):
         key = os.environ.get("TOGETHER_API_KEY") or key
@@ -411,7 +604,7 @@ def main() -> None:
     raise SystemExit(
         run(
             cohort_path=args.cohort_path,
-            output_dir=args.output_dir,
+            output_dir=output_dir,
             limit_npis=args.limit_npis,
             questions_spec=args.questions,
             methods=methods,
@@ -420,6 +613,9 @@ def main() -> None:
             base_url=args.base_url,
             api_key=key,
             save_demo_bundle=args.save_as_demo_bundle,
+            persona_variant=pv,
+            concurrency=args.concurrency,
+            run_id=args.run_id,
         )
     )
 

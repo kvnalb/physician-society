@@ -15,7 +15,9 @@ import streamlit as st
 PROJECT_ROOT = Path(__file__).resolve().parent
 SUMMARY_PATH = PROJECT_ROOT / "artifacts" / "demo" / "summary.json"
 SAMPLE_JSONL = PROJECT_ROOT / "artifacts" / "demo" / "sample_responses.jsonl"
-METRICS_PATH = PROJECT_ROOT / "artifacts" / "demo" / "metrics.json"
+DEFAULT_METRICS_PATH = PROJECT_ROOT / "artifacts" / "demo" / "metrics.json"
+RUNS_ROOT = PROJECT_ROOT / "data" / "output" / "runs"
+ARTIFACT_RUNS_DIR = PROJECT_ROOT / "artifacts" / "runs"
 COHORT_PATH = PROJECT_ROOT / "data" / "output" / "tirzepatide_simulation_cohort_100.tsv"
 
 
@@ -23,6 +25,35 @@ def _load_json(path: Path) -> dict:
     if not path.is_file():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _discover_metrics_files() -> list[tuple[str, Path]]:
+    """(label, path) for eval metrics JSON; deduped by resolved path."""
+    found: list[tuple[str, Path]] = []
+    if DEFAULT_METRICS_PATH.is_file():
+        found.append(("artifacts/demo/metrics.json (default demo)", DEFAULT_METRICS_PATH))
+    if RUNS_ROOT.is_dir():
+        for d in sorted(RUNS_ROOT.iterdir()):
+            if not d.is_dir():
+                continue
+            mp = d / "metrics.json"
+            if mp.is_file():
+                found.append((f"data/output/runs/{d.name}/metrics.json", mp))
+    if ARTIFACT_RUNS_DIR.is_dir():
+        for mp in sorted(ARTIFACT_RUNS_DIR.glob("*metrics*.json")):
+            if mp.is_file():
+                found.append((f"artifacts/runs/{mp.name}", mp))
+    seen: set[Path] = set()
+    out: list[tuple[str, Path]] = []
+    for label, p in found:
+        try:
+            r = p.resolve()
+        except OSError:
+            continue
+        if r not in seen:
+            seen.add(r)
+            out.append((label, p))
+    return out
 
 
 def _read_cohort_tsv() -> pd.DataFrame | None:
@@ -129,7 +160,6 @@ def main() -> None:
         )
 
     summary = _load_json(SUMMARY_PATH)
-    metrics = _load_json(METRICS_PATH)
 
     st.title("Tirzepatide adoption simulation")
     st.caption("Novo's 6-week decision problem (June 2022) — Medicare Part D–scoped physician POC")
@@ -169,6 +199,46 @@ def main() -> None:
         )
 
     st.header("Results")
+    metrics_options = _discover_metrics_files()
+    if not metrics_options:
+        st.warning("No `metrics.json` found. Run `make eval` or `python -m eval.run_eval`.")
+        metrics = {}
+        metrics_path_used: Path | None = None
+    else:
+        labels = [x[0] for x in metrics_options]
+        default_ix = 0
+        for i, (_, p) in enumerate(metrics_options):
+            if p.resolve() == DEFAULT_METRICS_PATH.resolve():
+                default_ix = i
+                break
+        pick = st.selectbox(
+            "Eval metrics snapshot",
+            range(len(labels)),
+            format_func=lambda i: labels[i],
+            index=default_ix,
+            help="Each batch run can write `data/output/runs/<run_id>/metrics.json` next to `responses.jsonl`. "
+            "`make eval` refreshes `artifacts/demo/metrics.json`.",
+        )
+        _, metrics_path_used = metrics_options[pick]
+        metrics = _load_json(metrics_path_used)
+        st.caption(f"Loaded: `{metrics_path_used.relative_to(PROJECT_ROOT)}`")
+
+    ba = metrics.get("behavioral_alignment") if metrics else None
+
+    rm = metrics.get("run_manifest")
+    if isinstance(rm, dict) and rm:
+        with st.expander("Run configuration (run_manifest.json)"):
+            st.json(rm)
+
+    ba = metrics.get("behavioral_alignment")
+    if isinstance(ba, dict) and ba.get("per_question"):
+        m_acc = ba.get("mean_accuracy_over_labeled_questions")
+        st.metric(
+            "Behavioral alignment (mean acc. vs pseudo-labels)",
+            f"{m_acc:.3f}" if m_acc is not None else "—",
+            help="Claims-derived pseudo-labels; see eval/behavioral_labels.py.",
+        )
+
     col1, col2, col3 = st.columns(3)
     col1.metric("NPIs in summary", summary.get("n_npis", "—"))
     col2.metric("Survey questions", summary.get("n_questions", "—"))
@@ -211,6 +281,23 @@ def main() -> None:
     if metrics.get("survey", {}).get("stability"):
         st.markdown(f"**Stability:** {metrics['survey']['stability']}")
 
+    if isinstance(ba, dict) and ba.get("per_question"):
+        st.subheader("Behavioral alignment (per question)")
+        st.dataframe(
+            [
+                {
+                    "question_id": qid,
+                    "n_labeled": v.get("n_labeled"),
+                    "accuracy": v.get("accuracy"),
+                    "js_divergence_marginal": v.get("js_divergence_marginal"),
+                    "tv_distance_marginal": v.get("tv_distance_marginal"),
+                }
+                for qid, v in ba["per_question"].items()
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
     st.header("Reasoning examples")
     lines = []
     if SAMPLE_JSONL.is_file():
@@ -238,6 +325,12 @@ def main() -> None:
                     sys.executable,
                     "-m",
                     "simulation.run_batch",
+                    "--run-id",
+                    "streamlit_smoke",
+                    "--persona-variant",
+                    "ab",
+                    "--concurrency",
+                    "4",
                     "--limit-npis",
                     "5",
                     "--model",

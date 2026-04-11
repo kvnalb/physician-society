@@ -37,7 +37,9 @@ demo:
 	$(VENV_PYTHON) -m streamlit run streamlit_app.py
 
 eval:
-	$(VENV_PYTHON) -m eval.run_eval
+	$(VENV_PYTHON) -m eval.run_eval \
+		--responses-file data/output/runs/latest/responses.jsonl \
+		--output artifacts/demo/metrics.json
 
 report-html:
 	$(VENV_PYTHON) docs/build_report.py

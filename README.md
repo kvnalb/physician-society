@@ -16,6 +16,8 @@ make eval
 make demo
 ```
 
+`make eval` writes **`artifacts/demo/metrics.json`** and, when `data/output/runs/latest/` exists, also **`data/output/runs/latest/metrics.json`**, embedding **`run_manifest.json`** from that run when present. Use **Eval metrics snapshot** in Streamlit to compare runs.
+
 Static HTML bundle (Jinja): `make report-html` → open `docs/build/demo_report.html`.
 
 ## API keys
@@ -35,7 +37,7 @@ Optional: `DEMO_REPO_URL=https://github.com/OWNER/REPO` to show a link in the St
 |--------|---------|
 | `make run-tirzepatide-cohort` | Build `data/output/tirzepatide_simulation_cohort_100.tsv` (gitignored when regenerated) |
 | `make demo` | Streamlit UI |
-| `make eval` | `responses.jsonl` → `artifacts/demo/metrics.json` |
+| `make eval` | Latest `responses.jsonl` → `artifacts/demo/metrics.json` + run sidecar `runs/latest/metrics.json` |
 | `make report-html` | `docs/build/demo_report.html` from narrative + demo JSON |
 | `make smoke-batch` | Short batch (5 NPIs) |
 | `make legacy-run-select-org` | Archived exploratory script (see below) |
