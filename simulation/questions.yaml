@@ -3,9 +3,9 @@
 questions:
   - question_id: f_q1_tirzepatide_12m
     text: >
-      It is June 2022; tirzepatide (Mounjaro) is newly available for type 2 diabetes in the U.S.
-      Looking ahead over the next 12 months, what do you expect your own Medicare Part D prescribing
-      to look like for appropriate patients?
+      Tirzepatide (Mounjaro) is newly on the scene for type 2 diabetes. Putting yourself in that
+      moment—no hindsight—how do you see **your own** prescribing shaking out for appropriate patients
+      over the **coming year or so** under Medicare Part D, realistically?
     options:
       - option_id: f_q1_expect_active
         label: I expect to use it actively for suitable patients
@@ -18,8 +18,9 @@ questions:
 
   - question_id: f_q2_glp1_trajectory
     text: >
-      Over the next program year (into 2023), how do you expect the share of your Medicare Part D
-      type 2 diabetes patients on any GLP-1 agent to change?
+      Stepping back from any single brand: looking out from mid‑2022, do you expect the **share of your
+      Medicare Part D type 2 diabetes patients** who are on **some** GLP‑1 therapy to **climb**, **hold
+      steady**, or **ease off** over the coming months?
     options:
       - option_id: f_q2_up
         label: Increase meaningfully
@@ -30,8 +31,9 @@ questions:
 
   - question_id: f_q3_branded_trajectory
     text: >
-      Over the next program year (into 2023), how do you expect your branded share among Part D
-      oral diabetes agents (where clinically relevant) to move?
+      Among the **oral** diabetes agents you reach for when it’s clinically appropriate, how do you
+      expect the **branded vs generic** mix on your Part D scripts to **shift** from here—more toward
+      branded, about the same, or more toward generic?
     options:
       - option_id: f_q3_up
         label: Shift toward more branded use
@@ -42,8 +44,9 @@ questions:
 
   - question_id: f_q4_diabetes_mix_trajectory
     text: >
-      Looking into the next data year, how do you expect your diabetes-related share of Part D
-      prescribing (for the patients you treat) to move?
+      Thinking about your overall Part D panel: over the stretch ahead, do you expect **diabetes-related
+      prescribing** to **make up a larger slice**, stay about the **same share**, or **thin out** relative
+      to everything else you write?
     options:
       - option_id: f_q4_up
         label: Diabetes mix increases meaningfully
@@ -54,8 +57,9 @@ questions:
 
   - question_id: f_q5_panel_scale_trajectory
     text: >
-      Relative to your 2022 baseline, how do you expect your overall Medicare Part D prescribing
-      activity (claim rows) to trend over the next year?
+      Compared with what you’re doing now (your 2022 baseline), how do you expect **overall Medicare Part D
+      prescribing activity**—the sheer **volume** of what shows up on Part D—to trend for you over the
+      coming months?
     options:
       - option_id: f_q5_up
         label: Meaningfully more Part D activity
@@ -66,8 +70,9 @@ questions:
 
   - question_id: f_q6_molecule_breadth_trajectory
     text: >
-      Over the next year, how do you expect the breadth of distinct diabetes-relevant molecules
-      you touch in Part D to change?
+      When you think about **distinct diabetes-related molecules** you touch on Part D—not one drug,
+      but the **breadth** of what you use—do you expect that footprint to **widen**, stay **about the
+      same**, or **narrow** over the coming months?
     options:
       - option_id: f_q6_up
         label: Broader / more distinct molecules

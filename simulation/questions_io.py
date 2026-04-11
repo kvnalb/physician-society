@@ -67,7 +67,7 @@ def format_multi_question_json_survey(questions: List[Question]) -> str:
         "Each option_id must be exactly one of the listed ids for that question.",
         "",
     ]
-    for q in qs:
+    for q in questions:
         lines.append(f"--- {q.question_id} ---")
         lines.append(q.text.strip())
         lines.append("")

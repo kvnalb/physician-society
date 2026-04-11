@@ -7,7 +7,20 @@ from typing import Any, Dict, List, Mapping, Tuple
 from simulation.questions_io import Question, format_multi_question_json_survey, format_question_block
 
 # Bump when any prompt string changes so disk cache invalidates across runs.
-PROMPT_VERSION = "2026-04-11-production-forward-holdout"
+PROMPT_VERSION = "2026-04-11-mounjaro-launch-framing"
+
+
+def _survey_launch_context_block() -> str:
+    """Shared June 2022 / Mounjaro launch framing before the structured survey (batch prompts only)."""
+    return (
+        "### Situation (read once before the items below)\n"
+        "We are in **mid‑2022**. **Tirzepatide (Mounjaro)** has recently reached the U.S. market for **type 2 diabetes**—"
+        "another GLP‑1–class option in a space that was already moving quickly (e.g. semaglutide products). "
+        "Formulary, access, peer chatter, and your own panel are all in flux; nobody has a crystal ball. "
+        "The items below ask how you see things **playing out from here over the coming months** for your "
+        "**Medicare Part D–visible** practice, the way you would reason **today**—not as if you had already "
+        "seen next year’s claims data."
+    )
 
 
 def _pct(x: Any) -> str:
@@ -35,8 +48,9 @@ def build_prompts_production_persona(row: Mapping[str, Any], question: Question)
         "Answer only from the perspective of the prescribing clinician described below. "
         "The profile is built from **Medicare Part D and Open Payments through calendar-year 2022** "
         "plus registry attributes. It deliberately **excludes any 2023 Part D outcomes**—treat "
-        "forward-looking survey items as **June 2022 judgments** about the next program year, not "
-        "as knowledge of what already happened in 2023 claims. "
+        "forward-looking survey items as **June 2022 judgments** about the months ahead—including how "
+        "the **new tirzepatide (Mounjaro) launch** might fit your practice—not as knowledge of what "
+        "already appears in later claims extracts. "
         "Stay consistent with the numeric 2022 practice profile; you may infer typical patterns "
         "but do not invent a personal name."
     )
@@ -168,5 +182,5 @@ def build_survey_prompts_for_persona_variant(
         raise ValueError("internal: could not strip single-question tail for survey prompt")
     prefix = first_user.replace(tail, "", 1).rstrip()
     survey_block = format_multi_question_json_survey(questions)
-    user = prefix + "\n\n" + survey_block
+    user = prefix + "\n\n" + _survey_launch_context_block() + "\n\n" + survey_block
     return system, user
