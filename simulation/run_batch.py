@@ -22,6 +22,8 @@ from simulation.questions_io import Question, load_questions
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNS_ROOT = PROJECT_ROOT / "data" / "output" / "runs"
 DEFAULT_COHORT = PROJECT_ROOT / "data" / "output" / "tirzepatide_simulation_cohort_100.tsv"
+DEFAULT_MODEL_TOGETHER = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+DEFAULT_MODEL_OPENAI = "gpt-4o-mini"
 
 _cache_lock = threading.Lock()
 
@@ -108,6 +110,7 @@ def run_offline_seed_demo(
         limit_npis=limit_npis,
         n_npis=len(df),
         cohort_path=cohort_path,
+        llm_provider="offline",
         base_url_set=False,
         offline=True,
     )
@@ -172,6 +175,7 @@ def _write_run_manifest(
     limit_npis: Optional[int],
     n_npis: int,
     cohort_path: Path,
+    llm_provider: str,
     base_url_set: bool,
     offline: bool,
 ) -> None:
@@ -187,6 +191,7 @@ def _write_run_manifest(
         "run_id": run_id,
         "persona_variant": persona_variant,
         "prompt_version": PROMPT_VERSION,
+        "llm_provider": llm_provider,
         "model": model,
         "temperature": temperature,
         "methods": methods,
@@ -318,6 +323,7 @@ def run(
     methods: List[str],
     model: str,
     temperature: float,
+    llm_provider: str,
     base_url: Optional[str],
     api_key: Optional[str],
     save_demo_bundle: bool,
@@ -416,6 +422,7 @@ def run(
         limit_npis=limit_npis,
         n_npis=len(df),
         cohort_path=cohort_path,
+        llm_provider=llm_provider,
         base_url_set=bool(base_url),
         offline=False,
     )
@@ -551,9 +558,27 @@ def main() -> None:
         help="Prompting strategy: naive|b|a force single stream (method_a rows only); ab|a_numeric for A/B.",
     )
     p.add_argument("--concurrency", type=int, default=12, help="Parallel LLM calls (default 12).")
-    p.add_argument("--model", type=str, default="gpt-4o-mini")
+    p.add_argument(
+        "--provider",
+        type=str,
+        default="together",
+        choices=["together", "openai"],
+        help="together = native Together SDK (default); openai = OpenAI client (optional --base-url).",
+    )
+    p.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help=f"Chat model id. Default: {DEFAULT_MODEL_TOGETHER} with --provider together, "
+        f"{DEFAULT_MODEL_OPENAI} with --provider openai.",
+    )
     p.add_argument("--temperature", type=float, default=0.2)
-    p.add_argument("--base-url", type=str, default=None, help="Together or other OpenAI-compatible base URL")
+    p.add_argument(
+        "--base-url",
+        type=str,
+        default=None,
+        help="Only for --provider openai: OpenAI-compatible API base URL (e.g. https://api.together.xyz/v1).",
+    )
     p.add_argument(
         "--save-as-demo-bundle",
         action="store_true",
@@ -570,6 +595,9 @@ def main() -> None:
         help="With --offline-seed-demo, also refresh artifacts/demo/ (default: do not overwrite demo).",
     )
     args = p.parse_args()
+
+    if args.model is None:
+        args.model = DEFAULT_MODEL_TOGETHER if args.provider == "together" else DEFAULT_MODEL_OPENAI
 
     if args.output_dir is not None:
         output_dir = args.output_dir
@@ -597,9 +625,12 @@ def main() -> None:
     else:
         methods = [args.method]
 
-    key = get_api_key("openai")
-    if args.base_url and os.environ.get("TOGETHER_API_KEY"):
-        key = os.environ.get("TOGETHER_API_KEY") or key
+    if args.provider == "together":
+        key = get_api_key("together")
+    else:
+        key = get_api_key("openai")
+        if args.base_url and os.environ.get("TOGETHER_API_KEY"):
+            key = os.environ.get("TOGETHER_API_KEY") or key
 
     raise SystemExit(
         run(
@@ -610,6 +641,7 @@ def main() -> None:
             methods=methods,
             model=args.model,
             temperature=args.temperature,
+            llm_provider=args.provider,
             base_url=args.base_url,
             api_key=key,
             save_demo_bundle=args.save_as_demo_bundle,

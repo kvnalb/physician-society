@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat completion with parse/retry."""
+"""LLM chat completion (Together native SDK or OpenAI-compatible client) with parse/retry."""
 
 from __future__ import annotations
 
@@ -44,10 +44,20 @@ def make_client(
     *,
     api_key: Optional[str],
     base_url: Optional[str],
+    provider: str = "together",
 ):
-    """Return OpenAI client or None if no key."""
+    """
+    Return a chat client or None if no key.
+
+    - provider ``together``: Together serverless SDK (``from together import Together``).
+    - provider ``openai``: ``openai.OpenAI``, optional ``base_url`` for compatible endpoints.
+    """
     if not api_key:
         return None
+    if provider == "together":
+        from together import Together
+
+        return Together(api_key=api_key)
     from openai import OpenAI
 
     kwargs: dict[str, Any] = {"api_key": api_key}

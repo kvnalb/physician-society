@@ -19,6 +19,7 @@ DEFAULT_METRICS_PATH = PROJECT_ROOT / "artifacts" / "demo" / "metrics.json"
 RUNS_ROOT = PROJECT_ROOT / "data" / "output" / "runs"
 ARTIFACT_RUNS_DIR = PROJECT_ROOT / "artifacts" / "runs"
 COHORT_PATH = PROJECT_ROOT / "data" / "output" / "tirzepatide_simulation_cohort_100.tsv"
+DEFAULT_TOGETHER_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
 
 
 def _load_json(path: Path) -> dict:
@@ -151,12 +152,22 @@ def main() -> None:
     with st.sidebar:
         st.header("LLM smoke re-run")
         st.caption("Session-only; not saved. Used when you trigger Advanced → live API re-run.")
-        smoke_model = st.text_input("Model", value="gpt-4o-mini", help="Passed to `simulation.run_batch --model`.")
+        smoke_provider = st.selectbox(
+            "LLM provider",
+            ["together", "openai"],
+            index=0,
+            help="together uses the native Together SDK; openai uses the OpenAI Python client (optional base URL).",
+        )
+        smoke_model = st.text_input(
+            "Model",
+            value=DEFAULT_TOGETHER_MODEL,
+            help="Together model id by default; use e.g. gpt-4o-mini with OpenAI provider.",
+        )
         smoke_temp = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.2, step=0.05)
         smoke_base_url = st.text_input(
             "API base URL (optional)",
             value="",
-            help="OpenAI-compatible base URL (e.g. Together). Leave empty for default OpenAI.",
+            help="Only for OpenAI provider: e.g. https://api.together.xyz/v1 for OpenAI-compatible endpoints.",
         )
 
     summary = _load_json(SUMMARY_PATH)
@@ -188,13 +199,14 @@ def main() -> None:
     if summary.get("offline_seed"):
         st.warning(
             "Demo bundle uses **offline deterministic seed** data (`--offline-seed-demo`), not real LLM calls. "
-            "Run `python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle` with an API key for "
-            "authentic responses."
+            "Run `python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle` with "
+            "`TOGETHER_API_KEY` (or `--provider openai` and `OPENAI_API_KEY`) for authentic responses."
         )
     elif summary.get("is_placeholder"):
         st.info(
             "Demo bundle is a **placeholder**. Run `python -m simulation.run_batch "
-            "--limit-npis 10 --save-as-demo-bundle` with `OPENAI_API_KEY` (or compatible provider) set, "
+            "--limit-npis 10 --save-as-demo-bundle` with `TOGETHER_API_KEY` set (default provider), "
+            "or `--provider openai` with `OPENAI_API_KEY`, "
             "or use `--offline-seed-demo` if you only need a runnable pipeline without an API."
         )
 
@@ -315,16 +327,24 @@ def main() -> None:
     st.header("Advanced")
     live = st.checkbox("Re-run with live API (session only; key not saved)")
     if live:
-        api_key = st.text_input("OPENAI_API_KEY", type="password", help="Used only in this browser session.")
+        key_label = "TOGETHER_API_KEY" if smoke_provider == "together" else "OPENAI_API_KEY"
+        api_key = st.text_input(key_label, type="password", help="Used only in this browser session.")
         if st.button("Smoke re-run (5 NPIs, all questions, both methods)"):
             if not api_key:
                 st.error("Enter an API key.")
             else:
-                env = {**os.environ, "OPENAI_API_KEY": api_key}
+                env = {**os.environ}
+                if smoke_provider == "together":
+                    env["TOGETHER_API_KEY"] = api_key
+                else:
+                    env["OPENAI_API_KEY"] = api_key
+                default_model = DEFAULT_TOGETHER_MODEL if smoke_provider == "together" else "gpt-4o-mini"
                 cmd = [
                     sys.executable,
                     "-m",
                     "simulation.run_batch",
+                    "--provider",
+                    smoke_provider,
                     "--run-id",
                     "streamlit_smoke",
                     "--persona-variant",
@@ -334,7 +354,7 @@ def main() -> None:
                     "--limit-npis",
                     "5",
                     "--model",
-                    smoke_model.strip() or "gpt-4o-mini",
+                    smoke_model.strip() or default_model,
                     "--temperature",
                     str(smoke_temp),
                     "--output-dir",
@@ -371,8 +391,9 @@ def main() -> None:
     )
     st.caption(
         f"{repo_line} Setup: `pip install -r requirements.txt` then `streamlit run streamlit_app.py` "
-        "or `make demo`. **Keys:** `OPENAI_API_KEY` or `TOGETHER_API_KEY` with `--base-url` for OpenAI-compatible "
-        "providers (see `.env.example`). **Limitations:** Medicare Part D only; annual files; "
+        "or `make demo`. **Keys:** `TOGETHER_API_KEY` for the default Together SDK, or `--provider openai` with "
+        "`OPENAI_API_KEY` (optional `--base-url`; see `.env.example`). **Limitations:** Medicare Part D only; "
+        "annual files; "
         "purposive cohort—not a national probability sample."
     )
 

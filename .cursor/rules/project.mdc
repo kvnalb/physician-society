@@ -34,7 +34,7 @@ claims data, validated against actual prescribing behavior.
 - CMS files may use latin-1 encoding, not UTF-8. Try both.
 
 # API Calls
-- Together AI for LLM inference (OpenAI-compatible API)
+- Together AI for LLM inference (native `together` SDK by default; optional OpenAI-compatible client)
 - Use async where possible with concurrency semaphore
 - Always implement retry logic with exponential backoff
 - Cache responses to avoid re-running on restart

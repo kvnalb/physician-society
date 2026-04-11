@@ -11,6 +11,7 @@ tqdm
 tenacity
 python-dotenv
 openai>=1.0,<2
+together>=1.2
 streamlit>=1.28
 requests
 openpyxl

@@ -24,10 +24,10 @@ Static HTML bundle (Jinja): `make report-html` → open `docs/build/demo_report.
 
 Copy [`.env.example`](.env.example) to `.env`. Supported patterns:
 
-- **OpenAI:** `OPENAI_API_KEY`
-- **OpenAI-compatible (e.g. Together):** `TOGETHER_API_KEY` and pass `--base-url` on `run_batch`, or set provider env vars as in [`simulation/llm_client.py`](simulation/llm_client.py).
+- **Together (default):** `TOGETHER_API_KEY`. Batch inference uses the native Together SDK (`from together import Together`). Pass `--model` with a Together model id (default on CLI: `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo`).
+- **OpenAI or OpenAI-compatible:** `--provider openai` with `OPENAI_API_KEY`, or `TOGETHER_API_KEY` plus `--base-url https://api.together.xyz/v1` for the OpenAI-compatible client. See [`simulation/llm_client.py`](simulation/llm_client.py).
 
-Streamlit **Advanced → live re-run** uses the sidebar model / temperature / base URL; keys are session-only.
+Streamlit **Advanced → live re-run** uses the sidebar provider / model / temperature / optional base URL; keys are session-only.
 
 Optional: `DEMO_REPO_URL=https://github.com/OWNER/REPO` to show a link in the Streamlit footer.
 
