@@ -1,4 +1,4 @@
-"""Persona prompt builders: naive, minimal (B), rich (A), A+numeric grounding, and AB (default)."""
+"""Persona prompt builders: naive, exec-style segment card (B), rich (A), A+numeric grounding, and AB (default)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Mapping, Tuple
 from simulation.questions_io import Question, format_multi_question_json_survey, format_question_block
 
 # Bump when any prompt string changes so disk cache invalidates across runs.
-PROMPT_VERSION = "2026-04-11-survey-json"
+PROMPT_VERSION = "2026-04-10-method-b-exec-briefing"
 
 
 def _pct(x: Any) -> str:
@@ -53,21 +53,105 @@ def build_prompts_method_a(row: Mapping[str, Any], question: Question) -> Tuple[
     return system, user
 
 
+def _method_b_pharma_paragraph(row: Mapping[str, Any]) -> str:
+    tier = str(row.get("pharma_engagement_tier") or "").strip()
+    mapping = {
+        "Low_Engagement": (
+            "**Low** aggregate Sunshine / Open Payments footprint versus peers—think **light touch**, "
+            "not **never interacts with industry**."
+        ),
+        "Medium_Engagement": (
+            "**Moderate** Sunshine footprint—some meals, consulting, or speaking shows up; stay realistic "
+            "about access conversations but do not invent dollar amounts."
+        ),
+        "High_Engagement": (
+            "**Heavier** Sunshine footprint than many peers—field teams would treat them as higher-touch; "
+            "still do not invent specific transfers of value."
+        ),
+    }
+    return mapping.get(
+        tier,
+        "Sunshine band is **unspecified on this card**—stay neutral; do not assume access favors any brand.",
+    )
+
+
+def _method_b_geo_paragraph(row: Mapping[str, Any]) -> str:
+    gc = str(row.get("geo_cluster") or "").strip()
+    if not gc:
+        return ""
+    parts = gc.split("_", 1)
+    if len(parts) < 2:
+        return (
+            f"Commercial planning tags them in bucket **{gc.replace('_', ' ')}**—use typical access and peer "
+            "dynamics implied for that slice."
+        )
+    st_abbrev, tail = parts[0], parts[1]
+    city_words = tail.replace("_", " ")
+    state_long = {"TX": "Texas", "CA": "California", "FL": "Florida", "NY": "New York"}.get(
+        st_abbrev, st_abbrev
+    )
+    return (
+        f"Geography bucket on the brand map: **{city_words}** ({state_long}). "
+        "Use that as implied patient mix and access pressure—not a census tract."
+    )
+
+
 def build_prompts_method_b(row: Mapping[str, Any], question: Question) -> Tuple[str, str]:
-    """Minimal persona: specialty, city, state, adoption archetype only."""
+    """
+    Exec-style “segment card” persona: specialty + home practice city/state, plus light brand-team
+    context (site line, archetype tag, Sunshine band, geo bucket)—deliberately **without** Part D tables
+    (those stay in Method A).
+    """
     spec = str(row.get("specialty", "Unknown"))
     city = str(row.get("city", ""))
     state = str(row.get("state", ""))
-    arch = str(row.get("adoption_archetype", "Unclassified"))
+    org = str(row.get("organization_name", "")).strip()
+    creds = str(row.get("credentials", "")).strip()
+    arch_raw = str(row.get("adoption_archetype", "Unclassified"))
+    arch_readable = arch_raw.replace("_", " ")
     system = (
-        "You are a U.S. physician. You have minimal context; infer typical practice patterns "
-        "for your specialty and location. Do not invent a personal name."
+        "You are role-playing **one** U.S. outpatient prescriber for a **fast workshop / ChatGPT-style drill**. "
+        "A brand-side colleague pasted a **short segment card** below—**not** the full data-room workbook "
+        "(no claim-by-claim tables). Stay internally consistent with the card. "
+        "Do not invent a personal name, a specific patient, or numeric claims metrics that are not implied."
     )
-    user = (
-        f"You are a {spec} physician practicing in {city}, {state}. "
-        f"Your prescribing style is summarized as: {arch} (label only; no detailed metrics).\n\n"
-        + format_question_block(question)
+    lines = [
+        "### Segment card (the kind of sketch a pharma lead would paste into ChatGPT before a workshop)",
+        "",
+        f"You are a **{spec}** clinician whose **home practice market** is **{city}, {state}**—anchor payer norms, "
+        "peer behavior, and “what feels typical here” to that community.",
+    ]
+    if creds:
+        lines.append(f"- **Registry credentials:** {creds}")
+    if org:
+        lines.append(f"- **Practice / site line on file (often an address or legal entity text):** {org}")
+    else:
+        lines.append(
+            "- **Practice / site:** Only the city/state above—assume a mainstream community or employed "
+            "setting unless the questions force a choice."
+        )
+    lines.extend(
+        [
+            f"- **Adoption posture tag from the forecasting team:** “{arch_readable}” "
+            f"(internal shorthand `{arch_raw}`—interpret it; do not quote the code back unless asked).",
+            f"- **Sunshine / Open Payments band (relationship intensity, not a moral score):** "
+            f"{_method_b_pharma_paragraph(row)}",
+        ]
     )
+    geo = _method_b_geo_paragraph(row)
+    if geo:
+        lines.append(f"- **Geo / priority-market context:** {geo}")
+    lines.extend(
+        [
+            "",
+            "Answer the survey as that clinician in **June 2022** (GLP-1 momentum; tirzepatide newly in market).",
+            "",
+            "---",
+            "",
+            format_question_block(question),
+        ]
+    )
+    user = "\n".join(lines)
     return system, user
 
 
@@ -121,10 +205,10 @@ def build_prompts_for_persona_variant(
     """
     persona_variant:
       naive — only specialty/geo (single-method runs use method_a label).
-      B — minimal grounded (Method B style).
+      B — exec-style segment card (Method B; no Part D tables).
       A — rich grounded (Method A style) for all method letters (single-method runs).
       AB — standard A vs B comparison.
-      A_numeric — Method A gets numeric grounding; Method B stays minimal.
+      A_numeric — Method A gets numeric grounding; Method B stays the segment-card style.
     """
     pv = persona_variant.strip().lower()
     m = method.upper()
