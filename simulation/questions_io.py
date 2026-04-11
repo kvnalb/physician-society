@@ -52,6 +52,30 @@ def validate_option_id(question: Question, option_id: str) -> bool:
     return any(o.option_id == option_id for o in question.options)
 
 
+def format_multi_question_json_survey(questions: List[Question]) -> str:
+    """
+    Instructions for answering every question in one JSON object (token-efficient vs N calls).
+    """
+    qid_list = ", ".join(f'"{q.question_id}"' for q in questions)
+    lines: List[str] = [
+        "You must answer ALL of the following survey questions in a single JSON object.",
+        "",
+        "Return ONLY valid JSON (no markdown code fences, no text before or after).",
+        'Top-level shape: {"answers": { "<question_id>": {"option_id": "...", "reasoning": "..."}, ... }}',
+        f"The answers object must contain exactly these keys: {qid_list}.",
+        "Each option_id must be exactly one of the listed ids for that question.",
+        "",
+    ]
+    for q in questions:
+        lines.append(f"--- {q.question_id} ---")
+        lines.append(q.text.strip())
+        lines.append("")
+        for o in q.options:
+            lines.append(f"  {o.option_id}: {o.label}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def format_question_block(q: Question) -> str:
     lines = [q.text.strip(), "", "Choose exactly one option by returning ONLY its option_id on the first line."]
     lines.append("")

@@ -1,4 +1,4 @@
-"""CLI: responses.jsonl -> metrics.json"""
+"""CLI: responses JSONL (v2: ``responses__<model>.jsonl``) -> metrics.json"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from eval.metrics import compute_metrics_bundle
+from simulation.responses_schema import resolve_responses_jsonl
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RESPONSES = PROJECT_ROOT / "data" / "output" / "runs" / "latest" / "responses.jsonl"
@@ -21,7 +22,8 @@ def _sidecar_metrics_path(responses_file: Path) -> Optional[Path]:
     except OSError:
         return None
     parts = rf.parts
-    if rf.name != "responses.jsonl":
+    name = rf.name
+    if not (name == "responses.jsonl" or (name.startswith("responses__") and name.endswith(".jsonl"))):
         return None
     if "runs" not in parts:
         return None
@@ -55,7 +57,8 @@ def main() -> None:
     )
     args = p.parse_args()
 
-    if not args.responses_file.is_file():
+    responses_path = resolve_responses_jsonl(args.responses_file) or args.responses_file
+    if not responses_path.is_file():
         print(f"Missing responses file: {args.responses_file}")
         # Write minimal metrics so downstream tools do not crash
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -64,7 +67,7 @@ def main() -> None:
             "survey": {
                 "method_agreement_kappa_mean": None,
                 "per_question": {},
-                "stability": "No responses.jsonl found; run simulation.run_batch with an API key.",
+                "stability": "No responses file found; run simulation.run_batch (writes responses__<model>.jsonl).",
             },
         }
         args.output.write_text(json.dumps(placeholder, indent=2), encoding="utf-8")
@@ -73,7 +76,7 @@ def main() -> None:
 
     cohort_p = args.cohort_path if args.cohort_path.is_file() else None
     bundle = compute_metrics_bundle(
-        args.responses_file,
+        responses_path,
         questions_yaml=args.questions_yaml,
         cohort_path=cohort_p,
         method_for_alignment=args.method_for_alignment,
@@ -96,7 +99,7 @@ def main() -> None:
         cohort_rel = str(args.cohort_path) if args.cohort_path.is_file() else None
 
     bundle["eval_meta"] = {
-        "responses_file": str(args.responses_file.resolve()),
+        "responses_file": str(responses_path.resolve()),
         "cohort_path": cohort_rel,
         "method_for_alignment": args.method_for_alignment,
         "questions_yaml": str(args.questions_yaml) if args.questions_yaml else None,
@@ -107,7 +110,7 @@ def main() -> None:
     args.output.write_text(text, encoding="utf-8")
     print(f"Wrote {args.output}")
 
-    sidecar = _sidecar_metrics_path(args.responses_file)
+    sidecar = _sidecar_metrics_path(responses_path)
     if sidecar and sidecar.resolve() != args.output.resolve():
         sidecar.parent.mkdir(parents=True, exist_ok=True)
         sidecar.write_text(text, encoding="utf-8")

@@ -231,7 +231,7 @@ def main() -> None:
             range(len(labels)),
             format_func=lambda i: labels[i],
             index=default_ix,
-            help="Each batch run can write `data/output/runs/<run_id>/metrics.json` next to `responses.jsonl`. "
+            help="Each batch run can write `data/output/runs/<run_id>/metrics.json` next to `responses__<model>.jsonl`. "
             "`make eval` refreshes `artifacts/demo/metrics.json`.",
         )
         _, metrics_path_used = metrics_options[pick]

@@ -16,9 +16,14 @@ from typing import Any, DefaultDict, Dict, List, Optional, Set, Tuple
 import pandas as pd
 
 from simulation.env_bootstrap import load_local_dotenv
-from simulation.llm_client import call_llm, get_api_key, make_client
-from simulation.persona_methods import PROMPT_VERSION, build_prompts_for_persona_variant
+from simulation.llm_client import call_llm_survey_json, get_api_key, make_client
+from simulation.persona_methods import PROMPT_VERSION, build_survey_prompts_for_persona_variant
 from simulation.questions_io import Question, load_questions
+from simulation.responses_schema import (
+    RESPONSE_ROW_SCHEMA_VERSION,
+    flatten_survey_rows,
+    responses_filename_for_model,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNS_ROOT = PROJECT_ROOT / "data" / "output" / "runs"
@@ -29,17 +34,25 @@ DEFAULT_MODEL_OPENAI = "gpt-4o-mini"
 _cache_lock = threading.Lock()
 
 
-def _synthetic_response_rows(
+def _rel_project(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _synthetic_survey_rows_v2(
     cohort_df: pd.DataFrame,
     questions: List[Question],
     *,
-    model: str,
     temperature: float,
 ) -> List[dict[str, Any]]:
-    """Deterministic A/B rows for CI or environments without an API key (not real LLM output)."""
+    """Deterministic v2 rows (one per NPI) for CI or environments without an API key."""
     rows: List[dict[str, Any]] = []
     for _, row in cohort_df.iterrows():
         npi = str(row.get("npi", ""))
+        method_a: Dict[str, Any] = {}
+        method_b: Dict[str, Any] = {}
         for q in questions:
             n_opt = len(q.options)
             if n_opt == 0:
@@ -49,26 +62,26 @@ def _synthetic_response_rows(
             ib = (h + 1) % n_opt
             opt_a = q.options[ia].option_id
             opt_b = q.options[ib].option_id
-            for letter, parsed in [("a", opt_a), ("b", opt_b)]:
-                rows.append(
-                    {
-                        "npi": npi,
-                        "question_id": q.question_id,
-                        "method": f"method_{letter}",
-                        "model": model,
-                        "temperature": temperature,
-                        "persona_variant": "offline_seed",
-                        "run_id": None,
-                        "prompt_version": PROMPT_VERSION,
-                        "raw": "",
-                        "parsed_option": parsed,
-                        "reasoning": "Offline deterministic seed (no LLM call).",
-                        "latency_ms": 0,
-                        "error": None,
-                        "cache_hit": False,
-                        "offline_seed": True,
-                    }
-                )
+            reason = "Offline deterministic seed (no LLM call)."
+            method_a[q.question_id] = {"option_id": opt_a, "reasoning": reason}
+            method_b[q.question_id] = {"option_id": opt_b, "reasoning": reason}
+        rows.append(
+            {
+                "schema_version": RESPONSE_ROW_SCHEMA_VERSION,
+                "npi": npi,
+                "persona_variant": "offline_seed",
+                "run_id": None,
+                "prompt_version": PROMPT_VERSION,
+                "temperature": temperature,
+                "method_a": method_a,
+                "method_b": method_b,
+                "raw_by_method": {"method_a": "", "method_b": ""},
+                "latency_ms_by_method": {"method_a": 0, "method_b": 0},
+                "survey_error_by_method": {"method_a": None, "method_b": None},
+                "cache_hit": False,
+                "offline_seed": True,
+            }
+        )
     return rows
 
 
@@ -92,13 +105,14 @@ def run_offline_seed_demo(
         return 1
     model = "offline_seed"
     temperature = 0.0
-    rows_out = _synthetic_response_rows(df, questions, model=model, temperature=temperature)
+    rows_out = _synthetic_survey_rows_v2(df, questions, temperature=temperature)
     output_dir.mkdir(parents=True, exist_ok=True)
-    jsonl_path = output_dir / "responses.jsonl"
+    responses_name = responses_filename_for_model(model)
+    jsonl_path = output_dir / responses_name
     with open(jsonl_path, "w", encoding="utf-8") as fh:
         for r in rows_out:
             fh.write(json.dumps(r) + "\n")
-    print(f"Wrote {jsonl_path.relative_to(PROJECT_ROOT)} (offline seed, n={len(rows_out)} rows).")
+    print(f"Wrote {_rel_project(jsonl_path)} (offline seed, n={len(rows_out)} NPI rows).")
     _write_run_manifest(
         output_dir=output_dir,
         run_id=run_id,
@@ -114,6 +128,8 @@ def run_offline_seed_demo(
         llm_provider="offline",
         base_url_set=False,
         offline=True,
+        responses_filename=responses_name,
+        response_row_schema_version=RESPONSE_ROW_SCHEMA_VERSION,
     )
     if write_demo_bundle:
         _write_demo_bundle(
@@ -122,6 +138,7 @@ def run_offline_seed_demo(
             questions=questions,
             methods=["A", "B"],
             model=model,
+            n_llm_calls=0,
         )
         demo_summary_path = PROJECT_ROOT / "artifacts" / "demo" / "summary.json"
         data = json.loads(demo_summary_path.read_text(encoding="utf-8"))
@@ -132,19 +149,19 @@ def run_offline_seed_demo(
     return 0
 
 
-def _cache_key(
+def _cache_key_survey(
     *,
     model: str,
     temperature: float,
     method: str,
-    question_id: str,
     npi: str,
     persona_variant: str,
     prompt_version: str,
+    question_ids_sig: str,
 ) -> str:
     h = hashlib.sha256(
         f"{prompt_version}|{persona_variant}|{model}|{temperature}|{method}|"
-        f"{question_id}|{npi}".encode()
+        f"{question_ids_sig}|{npi}".encode()
     ).hexdigest()[:32]
     return h
 
@@ -179,8 +196,10 @@ def _write_run_manifest(
     llm_provider: str,
     base_url_set: bool,
     offline: bool,
+    responses_filename: str,
+    response_row_schema_version: int,
 ) -> None:
-    """Snapshot run configuration next to responses.jsonl for reproducibility."""
+    """Snapshot run configuration next to the responses JSONL for reproducibility."""
     try:
         cohort_rel = str(cohort_path.resolve().relative_to(PROJECT_ROOT))
     except ValueError:
@@ -202,10 +221,12 @@ def _write_run_manifest(
         "n_npis_in_run": n_npis,
         "cohort_path": cohort_rel,
         "base_url_set": base_url_set,
+        "responses_filename": responses_filename,
+        "response_row_schema_version": response_row_schema_version,
     }
     p = output_dir / "run_manifest.json"
     p.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"Wrote {p.relative_to(PROJECT_ROOT)}")
+    print(f"Wrote {_rel_project(p)}")
 
 
 def _write_cache(cache_dir: Path, key: str, payload: dict[str, Any]) -> None:
@@ -223,12 +244,23 @@ def _select_questions(all_q: List[Question], spec: str) -> List[Question]:
     return [q for q in all_q if q.question_id in ids]
 
 
-def _execute_one_llm_task(
+def _cache_has_full_survey(cached: dict[str, Any], qs: List[Question]) -> bool:
+    ans = cached.get("answers")
+    if not isinstance(ans, dict):
+        return False
+    return all(
+        q.question_id in ans
+        and isinstance(ans[q.question_id], dict)
+        and ans[q.question_id].get("option_id")
+        for q in qs
+    )
+
+
+def _execute_one_npi_method_survey(
     *,
     task_idx: int,
     npi: str,
     method: str,
-    q: Question,
     rowd: dict[str, Any],
     persona_variant: str,
     run_id: Optional[str],
@@ -236,34 +268,37 @@ def _execute_one_llm_task(
     temperature: float,
     client: Any,
     cache_dir: Path,
-) -> Tuple[int, dict[str, Any], bool, bool]:
-    """Returns (idx, row_dict, cache_hit, had_error)."""
-    ck = _cache_key(
+    qs: List[Question],
+) -> Tuple[int, str, str, dict[str, Any], bool, bool]:
+    """
+    One LLM call per (NPI, method) for the full question set.
+    Returns (task_idx, npi, method_key, partial_row_fragment, cache_hit, had_error).
+    partial_row_fragment has keys: method_block, raw, latency_ms, error, cache_hit
+    where method_block is dict question_id -> {option_id, reasoning}.
+    """
+    method_key = f"method_{method.lower()}"
+    q_sig = ",".join(sorted(q.question_id for q in qs))
+    ck = _cache_key_survey(
         model=model,
         temperature=temperature,
         method=method,
-        question_id=q.question_id,
         npi=npi,
         persona_variant=persona_variant,
         prompt_version=PROMPT_VERSION,
+        question_ids_sig=q_sig,
     )
     with _cache_lock:
         cached = _read_cache(cache_dir, ck)
-    if cached and cached.get("parsed_option"):
+    if cached and _cache_has_full_survey(cached, qs):
+        ans = cached.get("answers")
+        assert isinstance(ans, dict)
         return (
             task_idx,
+            npi,
+            method_key,
             {
-                "npi": npi,
-                "question_id": q.question_id,
-                "method": f"method_{method.lower()}",
-                "model": model,
-                "temperature": temperature,
-                "persona_variant": persona_variant,
-                "run_id": run_id,
-                "prompt_version": PROMPT_VERSION,
-                "raw": cached.get("raw", ""),
-                "parsed_option": cached.get("parsed_option"),
-                "reasoning": cached.get("reasoning", ""),
+                "method_block": ans,
+                "raw": str(cached.get("raw", "")),
                 "latency_ms": int(cached.get("latency_ms", 0)),
                 "error": None,
                 "cache_hit": True,
@@ -272,40 +307,27 @@ def _execute_one_llm_task(
             False,
         )
 
-    system, user = build_prompts_for_persona_variant(persona_variant, method, rowd, q)
-    raw, parsed, reason, lat, err = call_llm(
+    system, user = build_survey_prompts_for_persona_variant(persona_variant, method, rowd, qs)
+    raw, parsed, lat, err = call_llm_survey_json(
         client,
         system=system,
         user=user,
         model=model,
         temperature=temperature,
-        question=q,
+        questions=qs,
     )
     had_error = bool(err)
-    if parsed:
-        payload = {
-            "raw": raw,
-            "parsed_option": parsed,
-            "reasoning": reason,
-            "latency_ms": lat,
-        }
+    if not err and parsed:
         with _cache_lock:
-            _write_cache(cache_dir, ck, payload)
+            _write_cache(cache_dir, ck, {"answers": parsed, "raw": raw, "latency_ms": lat})
 
     return (
         task_idx,
+        npi,
+        method_key,
         {
-            "npi": npi,
-            "question_id": q.question_id,
-            "method": f"method_{method.lower()}",
-            "model": model,
-            "temperature": temperature,
-            "persona_variant": persona_variant,
-            "run_id": run_id,
-            "prompt_version": PROMPT_VERSION,
+            "method_block": parsed if not err else {},
             "raw": raw,
-            "parsed_option": parsed,
-            "reasoning": reason,
             "latency_ms": lat,
             "error": err,
             "cache_hit": False,
@@ -358,29 +380,28 @@ def run(
 
     cache_dir = output_dir / "cache"
     output_dir.mkdir(parents=True, exist_ok=True)
-    jsonl_path = output_dir / "responses.jsonl"
+    responses_name = responses_filename_for_model(model)
+    jsonl_path = output_dir / responses_name
 
-    work: List[Tuple[int, str, str, Question, dict[str, Any]]] = []
+    work: List[Tuple[int, str, str, dict[str, Any]]] = []
     t = 0
     for _, row in df.iterrows():
         rowd = row.to_dict()
         npi = str(rowd.get("npi", ""))
         for method in methods:
-            for q in qs:
-                work.append((t, npi, method, q, rowd))
-                t += 1
+            work.append((t, npi, method, rowd))
+            t += 1
 
-    results: List[Optional[dict[str, Any]]] = [None] * len(work)
+    results: List[Optional[Tuple[str, str, dict[str, Any]]]] = [None] * len(work)
     cache_hits = 0
     errors = 0
 
-    def _submit(w: Tuple[int, str, str, Question, dict[str, Any]]) -> Tuple[int, dict[str, Any], bool, bool]:
-        idx, npi, method, q, rowd = w
-        return _execute_one_llm_task(
+    def _submit(w: Tuple[int, str, str, dict[str, Any]]) -> Tuple[int, str, str, dict[str, Any], bool, bool]:
+        idx, npi, method, rowd = w
+        return _execute_one_npi_method_survey(
             task_idx=idx,
             npi=npi,
             method=method,
-            q=q,
             rowd=rowd,
             persona_variant=persona_variant,
             run_id=run_id,
@@ -388,29 +409,57 @@ def run(
             temperature=temperature,
             client=client,
             cache_dir=cache_dir,
+            qs=qs,
         )
 
     n_workers = max(1, min(concurrency, len(work)))
     with ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = [pool.submit(_submit, w) for w in work]
         for fut in as_completed(futures):
-            idx, row_dict, hit, had_err = fut.result()
-            results[idx] = row_dict
+            idx, npi, method_key, frag, hit, had_err = fut.result()
+            results[idx] = (npi, method_key, frag)
             if hit:
                 cache_hits += 1
             if had_err:
                 errors += 1
 
-    rows_out = [r for r in results if r is not None]
+    by_npi: Dict[str, dict[str, Any]] = {}
+    for item in results:
+        if item is None:
+            continue
+        npi, method_key, frag = item
+        row = by_npi.setdefault(
+            npi,
+            {
+                "schema_version": RESPONSE_ROW_SCHEMA_VERSION,
+                "npi": npi,
+                "persona_variant": persona_variant,
+                "run_id": run_id,
+                "prompt_version": PROMPT_VERSION,
+                "temperature": temperature,
+                "raw_by_method": {},
+                "latency_ms_by_method": {},
+                "survey_error_by_method": {},
+                "cache_hits_by_method": {},
+            },
+        )
+        row[method_key] = frag.get("method_block") or {}
+        row["raw_by_method"][method_key] = frag.get("raw", "")
+        row["latency_ms_by_method"][method_key] = int(frag.get("latency_ms", 0))
+        row["survey_error_by_method"][method_key] = frag.get("error")
+        row["cache_hits_by_method"][method_key] = bool(frag.get("cache_hit"))
+
+    npi_order = [str(x) for x in df["npi"].tolist()]
+    rows_out = [by_npi[n] for n in npi_order if n in by_npi]
 
     with open(jsonl_path, "w", encoding="utf-8") as fh:
         for r in rows_out:
             fh.write(json.dumps(r) + "\n")
 
-    n_calls = len(rows_out)
+    n_llm_calls = len(work)
     print(
-        f"Wrote {jsonl_path.relative_to(PROJECT_ROOT)}: {n_calls} rows, "
-        f"{cache_hits} cache hits, {errors} rows with LLM errors, "
+        f"Wrote {_rel_project(jsonl_path)}: {len(rows_out)} NPI rows ({n_llm_calls} LLM calls), "
+        f"{cache_hits} cache hits, {errors} calls with LLM errors, "
         f"concurrency={n_workers}, persona_variant={persona_variant}, prompt_v={PROMPT_VERSION}."
     )
 
@@ -429,6 +478,8 @@ def run(
         llm_provider=llm_provider,
         base_url_set=bool(base_url),
         offline=False,
+        responses_filename=responses_name,
+        response_row_schema_version=RESPONSE_ROW_SCHEMA_VERSION,
     )
 
     if save_demo_bundle:
@@ -438,6 +489,7 @@ def run(
             questions=qs,
             methods=methods,
             model=model,
+            n_llm_calls=n_llm_calls,
         )
 
     return 0
@@ -450,13 +502,15 @@ def _write_demo_bundle(
     questions: List[Question],
     methods: List[str],
     model: str,
+    n_llm_calls: int,
 ) -> None:
     demo_dir = PROJECT_ROOT / "artifacts" / "demo"
     demo_dir.mkdir(parents=True, exist_ok=True)
 
+    flat = flatten_survey_rows(rows_out)
     # method_comparison: per question, distribution for method_a and method_b
     by_q: Dict[str, Dict[str, Counter]] = defaultdict(lambda: {"method_a": Counter(), "method_b": Counter()})
-    for r in rows_out:
+    for r in flat:
         if not r.get("parsed_option"):
             continue
         qid = r["question_id"]
@@ -502,7 +556,7 @@ def _write_demo_bundle(
                 hit = next(
                     (
                         r
-                        for r in rows_out
+                        for r in flat
                         if r["npi"] == npi
                         and r["question_id"] == q1
                         and r["method"] == f"method_{letter}"
@@ -519,7 +573,7 @@ def _write_demo_bundle(
         "n_questions": len(questions),
         "n_methods": len(methods),
         "model": model,
-        "total_api_calls": len(rows_out),
+        "total_api_calls": n_llm_calls,
         "total_cost_usd": None,
         "method_comparison": method_comparison,
         "adoption_by_archetype_actual": actual_adoption,

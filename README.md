@@ -8,7 +8,7 @@ Tirzepatide / GLP-1 **physician persona simulation** demo: Medicare Part D–gro
 make setup
 # Build cohort (long; needs CMS extracts under data/raw/ — gitignored)
 make run-tirzepatide-cohort
-# LLM batch → writes data/output/runs/latest/responses.jsonl
+# LLM batch → writes data/output/runs/latest/responses__<model>.jsonl (+ run_manifest.json)
 python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle
 # Optional: no API key — deterministic bundle for CI / UI smoke (not real LLM output)
 # python -m simulation.run_batch --offline-seed-demo --limit-npis 10
@@ -55,7 +55,7 @@ Optional: `DEMO_REPO_URL=https://github.com/OWNER/REPO` to show a link in the St
 |--------|---------|
 | `make run-tirzepatide-cohort` | Build `data/output/tirzepatide_simulation_cohort_100.tsv` (gitignored when regenerated) |
 | `make demo` | Streamlit UI |
-| `make eval` | Latest `responses.jsonl` → `artifacts/demo/metrics.json` + run sidecar `runs/latest/metrics.json` |
+| `make eval` | Latest run’s `responses.jsonl` or `responses__<model>.jsonl` (via manifest) → `artifacts/demo/metrics.json` + run sidecar `runs/latest/metrics.json` |
 | `make report-html` | `docs/build/demo_report.html` from narrative + demo JSON |
 | `make smoke-batch` | Short batch (5 NPIs) |
 | `make legacy-run-select-org` | Archived exploratory script (see below) |
