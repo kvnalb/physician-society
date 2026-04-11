@@ -1,0 +1,4 @@
+# Local secrets — keep out of Cursor indexing / default context where possible
+.env
+.env.local
+.env.*.local

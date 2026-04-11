@@ -22,7 +22,25 @@ Static HTML bundle (Jinja): `make report-html` → open `docs/build/demo_report.
 
 ## API keys
 
-Copy [`.env.example`](.env.example) to `.env`. Supported patterns:
+### Where to put the key (recommended)
+
+1. Copy [`.env.example`](.env.example) to **`.env`** in the **repository root** (same folder as `README.md`).
+2. Edit `.env` locally and set `TOGETHER_API_KEY=...` (and optionally `OPENAI_API_KEY` if you use `--provider openai`).
+3. **Never commit `.env`** — it is listed in `.gitignore`. **`.cursorignore`** also lists `.env` so Cursor is less likely to index it into default AI context (still avoid pasting keys into chat).
+
+`python -m simulation.run_batch` and `streamlit run streamlit_app.py` call **`simulation.env_bootstrap.load_local_dotenv()`** at startup, so variables from `.env` are loaded into the process **without** printing them. Existing shell environment variables take precedence (`override=False`).
+
+### Shell-only alternative
+
+You can `export TOGETHER_API_KEY=...` in a terminal before running commands. That does **not** write a file on disk.
+
+### Cursor agent terminals vs your shell
+
+An `export` you run in **your own** terminal tab is **not** automatically visible to **another** process, including terminals the **Cursor agent** starts. Those are usually fresh shells: they load your profile (`~/.zshrc`, etc.) but **not** ad-hoc exports from a different tab.
+
+So: **put the key in root `.env`** (or export inside the **same** terminal session right before you run a command there). For agent-driven runs from this repo, **`.env` is the reliable option** so `load_local_dotenv` picks it up when the agent runs `python -m simulation.run_batch` from the project root.
+
+### Providers
 
 - **Together (default):** `TOGETHER_API_KEY`. Batch inference uses the native Together SDK (`from together import Together`). Pass `--model` with a Together model id (default on CLI: `zai-org/GLM-5.1`).
 - **OpenAI or OpenAI-compatible:** `--provider openai` with `OPENAI_API_KEY`, or `TOGETHER_API_KEY` plus `--base-url https://api.together.xyz/v1` for the OpenAI-compatible client. See [`simulation/llm_client.py`](simulation/llm_client.py).

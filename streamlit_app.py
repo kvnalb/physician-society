@@ -12,6 +12,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from simulation.env_bootstrap import load_local_dotenv
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 SUMMARY_PATH = PROJECT_ROOT / "artifacts" / "demo" / "summary.json"
 SAMPLE_JSONL = PROJECT_ROOT / "artifacts" / "demo" / "sample_responses.jsonl"
@@ -147,6 +149,7 @@ def _render_sample_description(cohort_df: pd.DataFrame | None) -> None:
 
 
 def main() -> None:
+    load_local_dotenv(override=False)
     st.set_page_config(page_title="Tirzepatide Adoption Simulation", layout="wide")
 
     with st.sidebar:

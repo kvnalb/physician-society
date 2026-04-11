@@ -15,6 +15,7 @@ from typing import Any, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
+from simulation.env_bootstrap import load_local_dotenv
 from simulation.llm_client import call_llm, get_api_key, make_client
 from simulation.persona_methods import PROMPT_VERSION, build_prompts_for_persona_variant
 from simulation.questions_io import Question, load_questions
@@ -346,9 +347,12 @@ def run(
     if limit_npis is not None:
         df = df.head(limit_npis)
 
-    client = make_client(api_key=api_key, base_url=base_url)
+    client = make_client(api_key=api_key, base_url=base_url, provider=llm_provider)
     if client is None:
-        print("OPENAI_API_KEY (or TOGETHER_API_KEY with --base-url) not set; skipping API calls.")
+        if llm_provider == "together":
+            print("No API key for Together: set TOGETHER_API_KEY (or OPENAI_API_KEY if you use that env).")
+        else:
+            print("OPENAI_API_KEY not set (or TOGETHER_API_KEY when using --base-url with Together).")
         print("Use --save-as-demo-bundle only after setting a key, or commit pre-built artifacts/demo/.")
         return 0
 
@@ -533,6 +537,7 @@ def _write_demo_bundle(
 
 
 def main() -> None:
+    load_local_dotenv(override=False)
     p = argparse.ArgumentParser(description="Run LLM survey batch over physician cohort.")
     p.add_argument("--cohort-path", type=Path, default=DEFAULT_COHORT)
     p.add_argument(
