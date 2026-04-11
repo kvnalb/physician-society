@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import random
 import threading
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -198,6 +199,8 @@ def _write_run_manifest(
     offline: bool,
     responses_filename: str,
     response_row_schema_version: int,
+    shuffle_questions: bool = False,
+    shuffle_seed: Optional[int] = None,
 ) -> None:
     """Snapshot run configuration next to the responses JSONL for reproducibility."""
     try:
@@ -223,6 +226,8 @@ def _write_run_manifest(
         "base_url_set": base_url_set,
         "responses_filename": responses_filename,
         "response_row_schema_version": response_row_schema_version,
+        "shuffle_questions": shuffle_questions,
+        "shuffle_seed": shuffle_seed,
     }
     p = output_dir / "run_manifest.json"
     p.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -268,7 +273,7 @@ def _execute_one_npi_method_survey(
     temperature: float,
     client: Any,
     cache_dir: Path,
-    qs: List[Question],
+    qs_ordered: List[Question],
 ) -> Tuple[int, str, str, dict[str, Any], bool, bool]:
     """
     One LLM call per (NPI, method) for the full question set.
@@ -277,7 +282,7 @@ def _execute_one_npi_method_survey(
     where method_block is dict question_id -> {option_id, reasoning}.
     """
     method_key = f"method_{method.lower()}"
-    q_sig = ",".join(sorted(q.question_id for q in qs))
+    q_sig = ",".join(q.question_id for q in qs_ordered)
     ck = _cache_key_survey(
         model=model,
         temperature=temperature,
@@ -289,7 +294,7 @@ def _execute_one_npi_method_survey(
     )
     with _cache_lock:
         cached = _read_cache(cache_dir, ck)
-    if cached and _cache_has_full_survey(cached, qs):
+    if cached and _cache_has_full_survey(cached, qs_ordered):
         ans = cached.get("answers")
         assert isinstance(ans, dict)
         return (
@@ -307,14 +312,14 @@ def _execute_one_npi_method_survey(
             False,
         )
 
-    system, user = build_survey_prompts_for_persona_variant(persona_variant, method, rowd, qs)
+    system, user = build_survey_prompts_for_persona_variant(persona_variant, method, rowd, qs_ordered)
     raw, parsed, lat, err = call_llm_survey_json(
         client,
         system=system,
         user=user,
         model=model,
         temperature=temperature,
-        questions=qs,
+        questions=qs_ordered,
     )
     had_error = bool(err)
     if not err and parsed:
@@ -353,6 +358,8 @@ def run(
     persona_variant: str,
     concurrency: int,
     run_id: Optional[str],
+    shuffle_questions: bool = False,
+    shuffle_seed: int = 0,
 ) -> int:
     questions = load_questions()
     qs = _select_questions(questions, questions_spec)
@@ -377,6 +384,10 @@ def run(
             print("OPENAI_API_KEY not set (or TOGETHER_API_KEY when using --base-url with Together).")
         print("Use --save-as-demo-bundle only after setting a key, or commit pre-built artifacts/demo/.")
         return 0
+
+    qs_survey = list(qs)
+    if shuffle_questions:
+        random.Random(int(shuffle_seed)).shuffle(qs_survey)
 
     cache_dir = output_dir / "cache"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -409,7 +420,7 @@ def run(
             temperature=temperature,
             client=client,
             cache_dir=cache_dir,
-            qs=qs,
+            qs_ordered=qs_survey,
         )
 
     n_workers = max(1, min(concurrency, len(work)))
@@ -480,6 +491,8 @@ def run(
         offline=False,
         responses_filename=responses_name,
         response_row_schema_version=RESPONSE_ROW_SCHEMA_VERSION,
+        shuffle_questions=shuffle_questions,
+        shuffle_seed=shuffle_seed if shuffle_questions else None,
     )
 
     if save_demo_bundle:
@@ -585,7 +598,7 @@ def _write_demo_bundle(
     )
     sample_path = demo_dir / "sample_responses.jsonl"
     with open(sample_path, "w", encoding="utf-8") as fh:
-        for line in rows_out[:10]:
+        for line in flat[:40]:
             fh.write(json.dumps(line) + "\n")
     print(f"Wrote {demo_dir / 'summary.json'} and {sample_path.name}")
 
@@ -653,6 +666,17 @@ def main() -> None:
         action="store_true",
         help="With --offline-seed-demo, also refresh artifacts/demo/ (default: do not overwrite demo).",
     )
+    p.add_argument(
+        "--shuffle-questions",
+        action="store_true",
+        help="Shuffle question block order in the joint survey prompt (same seed for all NPIs in run).",
+    )
+    p.add_argument(
+        "--shuffle-seed",
+        type=int,
+        default=0,
+        help="RNG seed when --shuffle-questions is set (default 0).",
+    )
     args = p.parse_args()
 
     if args.model is None:
@@ -707,6 +731,8 @@ def main() -> None:
             persona_variant=pv,
             concurrency=args.concurrency,
             run_id=args.run_id,
+            shuffle_questions=bool(args.shuffle_questions),
+            shuffle_seed=int(args.shuffle_seed),
         )
     )
 

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import random
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -66,7 +67,7 @@ def format_multi_question_json_survey(questions: List[Question]) -> str:
         "Each option_id must be exactly one of the listed ids for that question.",
         "",
     ]
-    for q in questions:
+    for q in qs:
         lines.append(f"--- {q.question_id} ---")
         lines.append(q.text.strip())
         lines.append("")

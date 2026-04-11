@@ -71,10 +71,30 @@ Each run uses **structured prompts** built from the same cohort row. We compare 
 
 A **small battery** of **single-select** items—worded like **clinical–commercial judgment** (e.g., second-line preferences, GLP-1 penetration bands, adoption posture, branded vs generic leaning). Responses are constrained to **machine-parseable** option IDs so we can **aggregate distributions** and **compare methods**.
 
+Each persona completes the **full battery in one structured completion per method** (joint JSON), which is natural for an “artificial society” workflow but means **answers across questions are not statistically independent within a method**—they are **joint draws**. Item-level metrics (e.g., \(\kappa\) on one question) are still well-defined as **marginals of that joint process**.
+
 ### Evaluation (pre-defined at concept level)
 
 - **Method comparison:** Agreement between rich vs minimal elicitation (e.g., Cohen’s \(\kappa\) on paired NPI–question responses), plus per-question distribution contrasts.
 - **Behavioral readout (descriptive):** **Empirical** adoption and class dynamics in **2023 Part D** for the same cohort—reported as **baselines** and segment breakdowns, not as proof of causal impact of any single factor.
+
+#### Evaluation pillars (aligned with “distribution + coherence” framing)
+
+1. **Distribution / method contrast (primary, in-repo)**  
+   - **Reference A — method A vs method B:** Jensen–Shannon and total-variation distance between **synthetic marginal distributions** for the same question (rich vs minimal prompts), in addition to Cohen’s \(\kappa\).  
+   - **Reference B — claims-derived pseudo-labels (where defined):** For items mapped defensibly from Part D aggregates, compare synthetic choices to **pseudo–ground-truth** option IDs (see `eval/behavioral_labels.py`). This is **not** human survey validation.  
+   - **Not in default scope:** matching a **national human tracker** panel (optional CSV path is documented in `eval/README.md` for future licensing).
+
+2. **Persona internal coherence (lightweight, rule-based)**  
+   Deterministic **cross-item consistency checks** on parsed options (e.g., tirzepatide adoption speed vs “ever prescribed”) flag impossible combinations. This is an **audit / hygiene** signal, not a claim about real physician cognition.
+
+3. **Instrument and run health**  
+   Parse success, missing cells, and latency summaries from each run’s JSONL—**operational quality**, analogous to platform SLOs in production systems.
+
+4. **Stability / sensitivity (optional protocol)**  
+   Duplicate runs on the same cohort slice (ideally temperature 0) and optional **shuffled question order** (`simulation.run_batch --shuffle-questions`) quantify **stochastic and order sensitivity** without new data. See `docs/retest_stability.md` and `scripts/compare_runs_stability.py`.
+
+**Claims traceability:** `simulation/question_claims_map.yaml` lists cohort fields tied to each item for transparency.
 
 We **avoid** claiming **national predictive validation** or **causal** effects of industry payments on prescribing unless the design explicitly supports it.
 

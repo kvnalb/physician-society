@@ -254,6 +254,29 @@ def main() -> None:
             help="Claims-derived pseudo-labels; see eval/behavioral_labels.py.",
         )
 
+    dq = metrics.get("distribution_quality") if metrics else None
+    if isinstance(dq, dict):
+        mjs = dq.get("mean_js_method_ab")
+        st.metric(
+            "Distribution: mean JS (A vs B marginals)",
+            f"{mjs:.4f}" if mjs is not None else "—",
+            help="Per-question Jensen–Shannon between method_a and method_b histograms (not human panel).",
+        )
+
+    pc = metrics.get("persona_coherence") if metrics else None
+    if isinstance(pc, dict) and pc.get("violation_rate_per_method_block") is not None:
+        vr = pc["violation_rate_per_method_block"]
+        st.metric(
+            "Coherence: rule violation rate",
+            f"{vr:.3f}" if vr is not None else "—",
+            help="Cross-item consistency rules in eval/coherence_rules.py (heuristic).",
+        )
+
+    ih = metrics.get("instrument_health") if metrics else None
+    if isinstance(ih, dict) and ih.get("flat_cells_missing_option") is not None:
+        miss = ih.get("flat_cells_missing_option")
+        st.metric("Run health: missing option cells", int(miss) if miss is not None else "—")
+
     col1, col2, col3 = st.columns(3)
     col1.metric("NPIs in summary", summary.get("n_npis", "—"))
     col2.metric("Survey questions", summary.get("n_questions", "—"))
@@ -312,6 +335,32 @@ def main() -> None:
             hide_index=True,
             use_container_width=True,
         )
+
+    surv = metrics.get("survey", {}) if metrics else {}
+    pq = surv.get("per_question") or {}
+    if pq and any("js_method_ab_marginal" in v for v in pq.values()):
+        st.subheader("Method A vs B — marginal divergence (per question)")
+        st.dataframe(
+            [
+                {
+                    "question_id": qid,
+                    "n_paired": v.get("n_paired"),
+                    "js_method_ab": v.get("js_method_ab_marginal"),
+                    "tv_method_ab": v.get("tv_method_ab_marginal"),
+                }
+                for qid, v in pq.items()
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    if isinstance(ih, dict) and ih:
+        with st.expander("Instrument / run health"):
+            st.json(ih)
+
+    if isinstance(pc, dict) and pc.get("violations_sample"):
+        with st.expander("Persona coherence — sample violations"):
+            st.dataframe(pc["violations_sample"], hide_index=True, use_container_width=True)
 
     st.header("Reasoning examples")
     lines = []

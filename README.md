@@ -16,7 +16,7 @@ make eval
 make demo
 ```
 
-`make eval` writes **`artifacts/demo/metrics.json`** and, when `data/output/runs/latest/` exists, also **`data/output/runs/latest/metrics.json`**, embedding **`run_manifest.json`** from that run when present. Use **Eval metrics snapshot** in Streamlit to compare runs.
+`make eval` writes **`artifacts/demo/metrics.json`** and, when `data/output/runs/latest/` exists, also **`data/output/runs/latest/metrics.json`**, embedding **`run_manifest.json`** from that run when present. Use **Eval metrics snapshot** in Streamlit to compare runs. Metrics include **instrument health**, **distribution quality** (method A vs B marginal JS/TV), and **persona coherence** (cross-item rules); see [`eval/README.md`](eval/README.md). **Retest / order sensitivity:** [`docs/retest_stability.md`](docs/retest_stability.md) and `scripts/compare_runs_stability.py`. Optional **`--shuffle-questions`** on `run_batch` shuffles prompt block order (fixed `--shuffle-seed`).
 
 Static HTML bundle (Jinja): `make report-html` → open `docs/build/demo_report.html`.
 

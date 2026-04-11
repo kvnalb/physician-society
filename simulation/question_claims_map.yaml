@@ -1,0 +1,48 @@
+# Maps each survey item to Medicare Part D / cohort fields used in prompts or eval.
+# "eval_pseudo_label" references eval/behavioral_labels.py (RULES_VERSION).
+# This file is documentation + machine-readable traceability (no logic depends on it yet).
+version: 1
+items:
+  q1_second_line_agent:
+    prompt_context_fields:
+      - diabetes_share_2022
+      - glp1_penetration_2022
+      - adoption_archetype
+    eval_pseudo_label: none
+    notes: No defensible per-NPI pseudo-label from current aggregates (NO_LABEL_QUESTIONS).
+
+  q2_glp1_panel_share:
+    prompt_context_fields:
+      - glp1_penetration_2022
+    eval_pseudo_label:
+      field: glp1_penetration_2022
+      module: eval.behavioral_labels
+
+  q3_tirzepatide_prescribed:
+    prompt_context_fields:
+      - has_tirzepatide_2022
+    eval_pseudo_label:
+      field: has_tirzepatide_2022
+      module: eval.behavioral_labels
+
+  q4_tirzepatide_adoption_speed:
+    prompt_context_fields:
+      - has_tirzepatide_2022
+      - adoption_archetype
+    eval_pseudo_label:
+      fields: [has_tirzepatide_2022, adoption_archetype]
+      module: eval.behavioral_labels
+
+  q5_branded_vs_generic:
+    prompt_context_fields:
+      - branded_share_2022
+    eval_pseudo_label:
+      field: branded_share_2022
+      module: eval.behavioral_labels
+
+  q6_diabetes_drug_count:
+    prompt_context_fields:
+      - drug_diversity_2022
+    eval_pseudo_label:
+      field: drug_diversity_2022
+      module: eval.behavioral_labels
