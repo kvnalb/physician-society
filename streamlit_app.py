@@ -54,9 +54,27 @@ def _inject_page_styles() -> None:
         <style>
           /* Slightly calmer reading width on ultra-wide monitors */
           .block-container { max-width: 1200px; }
+          /* Lift default prose so paragraphs/lists read closer to header scale */
+          div[data-testid="stMarkdownContainer"] {
+            font-size: 1.07rem;
+            line-height: 1.62;
+          }
+          div[data-testid="stMarkdownContainer"] p {
+            font-size: inherit;
+            line-height: inherit;
+          }
+          div[data-testid="stMarkdownContainer"] li {
+            line-height: inherit;
+            margin-bottom: 0.35rem;
+          }
+          /* Info / warning callouts use the same markdown nodes */
+          div[data-testid="stAlert"] div[data-testid="stMarkdownContainer"] {
+            font-size: 1.05rem;
+            line-height: 1.58;
+          }
           .ps-callout {
-            font-size: 0.95rem;
-            line-height: 1.55;
+            font-size: 1.02rem;
+            line-height: 1.58;
             color: #1f2937;
             background: #f8fafc;
             border-left: 3px solid #2E5077;
@@ -67,8 +85,8 @@ def _inject_page_styles() -> None:
           .ps-callout p { margin: 0 0 0.55rem 0; }
           .ps-callout p:last-child { margin-bottom: 0; }
           .ps-muted {
-            font-size: 0.88rem;
-            line-height: 1.5;
+            font-size: 0.98rem;
+            line-height: 1.55;
             color: #4b5563;
             margin: 0.15rem 0 0.85rem 0;
           }
@@ -259,10 +277,9 @@ def _render_sidebar_smoke_settings() -> tuple[str, str, float, str]:
 
 def _render_title_block() -> None:
     """Main page title and subtitle (first visible content in the main column)."""
-    st.title("Tirzepatide adoption simulation")
+    st.title("How do physicians react to a new GLP-1 drug launch?")
     st.caption(
-        "Novo Nordisk-style six-week decision framing (June 2022) — Medicare Part D–scoped physician proof of "
-        "concept (POC)."
+        "Target Audience: Novo Nordisk Branding/Comms team"
     )
 
 
