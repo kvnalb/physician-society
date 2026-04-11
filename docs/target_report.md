@@ -16,7 +16,7 @@ Traditional market research—national physician surveys, deep qual, longitudina
 
 Administrative **Medicare Part D** data offer a **repeatable, scalable** view of **prescribing mix** at the physician level, before and after a launch window. When linked to **registry** attributes (specialty, geography) and **Open Payments** exposure, they support **grounded personas**: not imaginary doctors, but **specific NPIs** summarized by **observed** professional context and **observed** prescribing.
 
-**LLM-based simulation** then lets us **elicit structured judgments** (e.g., single-select survey items about diabetes prescribing and adoption posture) **at scale**, compare **alternative persona-construction methods**, and optionally contrast elicited responses with **behavioral outcomes** measured in the **next** data year.
+**LLM-based simulation** then lets us **elicit structured judgments** (e.g., single-select survey items about diabetes prescribing and adoption posture) **at scale** from **grounded personas**, and contrast elicited responses with **behavioral outcomes** measured in the **next** data year (hold-out style).
 
 This demo is a **proof of concept** for that workflow—not a production forecast for a single brand.
 
@@ -62,27 +62,22 @@ That boundary should be **stated once clearly** and then used consistently in al
 
 ### Personas
 
-Each run uses **structured prompts** built from the same cohort row. We compare at least **two methods**:
-
-- **Rich persona:** Many **observed** fields (prescribing mix, engagement tier, archetype labels, etc.).
-- **Minimal persona:** A **sparse** subset (e.g., specialty, geography, archetype) to test how much **context** is needed for stable elicitation.
+The **default** run uses a **single production persona** per cohort row: **Medicare Part D + Open Payments through CY2022** (registry attributes, prescribing mix, engagement tier, archetype labels, etc.). **2023 Part D outcomes are excluded from the prompt** so forward items are not answered from a printed “what happened next” line. Legacy **`a`** (rich with 2022 tirzepatide line) and **`naive`** variants exist for sensitivity checks.
 
 ### Instrument
 
-A **small battery** of **single-select** items—worded like **clinical–commercial judgment** (e.g., second-line preferences, GLP-1 penetration bands, adoption posture, branded vs generic leaning). Responses are constrained to **machine-parseable** option IDs so we can **aggregate distributions** and **compare methods**.
-
-Each persona completes the **full battery in one structured completion per method** (joint JSON), which is natural for an “artificial society” workflow but means **answers across questions are not statistically independent within a method**—they are **joint draws**. Item-level metrics (e.g., \(\kappa\) on one question) are still well-defined as **marginals of that joint process**.
+A **small battery** of **single-select** items framed as **June 2022 forward** clinical–commercial judgment (e.g., expected tirzepatide uptake, expected GLP-1 / branded / panel trajectories). Responses use **machine-parseable** option IDs. Each persona completes the **full battery in one structured JSON completion** (joint draw across items).
 
 ### Evaluation (pre-defined at concept level)
 
-- **Method comparison:** Agreement between rich vs minimal elicitation (e.g., Cohen’s \(\kappa\) on paired NPI–question responses), plus per-question distribution contrasts.
+- **Hold-out alignment (primary):** Pseudo–ground-truth option IDs from **later Part D fields** in the same cohort row (and simple deltas 2022→2023) compared to simulated answers—**not** human survey validation (see `eval/behavioral_labels.py`).
+- **Simulated marginals:** Per-item answer histograms from the single **method_a** stream (for workshop scenario shape).
 - **Behavioral readout (descriptive):** **Empirical** adoption and class dynamics in **2023 Part D** for the same cohort—reported as **baselines** and segment breakdowns, not as proof of causal impact of any single factor.
 
-#### Evaluation pillars (aligned with “distribution + coherence” framing)
+#### Evaluation pillars (aligned with “hold-out + coherence” framing)
 
-1. **Distribution / method contrast (primary, in-repo)**  
-   - **Reference A — method A vs method B:** Jensen–Shannon and total-variation distance between **synthetic marginal distributions** for the same question (rich vs minimal prompts), in addition to Cohen’s \(\kappa\).  
-   - **Reference B — claims-derived pseudo-labels (where defined):** For items mapped defensibly from Part D aggregates, compare synthetic choices to **pseudo–ground-truth** option IDs (see `eval/behavioral_labels.py`). This is **not** human survey validation.  
+1. **Distribution vs hold-out pseudo marginals (primary, in-repo)**  
+   Jensen–Shannon / total-variation distance between **simulated answer histograms** and **pseudo-label histograms** built from **post-2022** administrative fields, plus per-item exact-match rates where labels exist.  
    - **Not in default scope:** matching a **national human tracker** panel (optional CSV path is documented in `eval/README.md` for future licensing).
 
 2. **Persona internal coherence (lightweight, rule-based)**  
@@ -135,7 +130,7 @@ The path from here to production is **scale** (more personas, more questions, ri
 
 ## 7. One-sentence summary
 
-> We **scope** the study to **Medicare Part D–visible, diabetes-active prescribers in priority metros**, elicit **structured judgments** with **LLM personas** built at **two richness levels**, and **compare** those elicitations to each other and to **observed 2023 prescribing**—to support **fast, segment-aware, hypothesis-generating** launch analytics without pretending we sampled **all U.S. physicians**.
+> We **scope** the study to **Medicare Part D–visible, diabetes-active prescribers in priority metros**, elicit **structured judgments** with **LLM personas** grounded in **2022-era administrative context**, and **compare** those elicitations to **observed 2023 prescribing**—to support **fast, segment-aware, hypothesis-generating** launch analytics without pretending we sampled **all U.S. physicians**.
 
 ---
 

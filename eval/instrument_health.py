@@ -59,13 +59,12 @@ def compute_instrument_health(
             survey_errors += sum(1 for v in errm.values() if v)
 
     missing_cells = 0
-    expected_methods = ("method_a", "method_b")
     for r in raw:
         if not is_v2_survey_row(r):
             continue
-        for mk in expected_methods:
+        for mk in ("method_a",):
             block = r.get(mk)
-            if not isinstance(block, dict):
+            if not isinstance(block, dict) or not block:
                 continue
             for qid in qids:
                 cell = block.get(qid)

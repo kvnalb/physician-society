@@ -5,7 +5,12 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from simulation.persona_methods import build_prompts_method_a, build_prompts_method_b
+from simulation.persona_methods import (
+    build_prompts_for_persona_variant,
+    build_prompts_method_a,
+    build_prompts_naive,
+    build_prompts_production_persona,
+)
 from simulation.questions_io import load_questions, question_ids
 
 
@@ -41,20 +46,30 @@ class TestPersonaMethods(unittest.TestCase):
     def test_question_ids_stable(self) -> None:
         ids = question_ids(self.questions)
         self.assertEqual(len(ids), 6)
-        self.assertEqual(ids[0], "q1_second_line_agent")
+        self.assertEqual(ids[0], "f_q1_tirzepatide_12m")
 
     def test_method_a_non_empty(self) -> None:
         s, u = build_prompts_method_a(self.fake_row, self.q1)
         self.assertTrue(s.strip())
         self.assertTrue(u.strip())
-        self.assertIn("q1_", u)
+        self.assertIn("f_q1_", u)
 
-    def test_method_b_non_empty(self) -> None:
-        s, u = build_prompts_method_b(self.fake_row, self.q1)
-        self.assertTrue(s.strip())
-        self.assertTrue(u.strip())
-        self.assertIn("Houston", u)
-        self.assertIn("Conservative_PCP", u)
+    def test_production_persona_no_2022_tirz_line(self) -> None:
+        s, u = build_prompts_production_persona(self.fake_row, self.q1)
+        self.assertIn("2022 baseline", u)
+        self.assertNotIn("Any tirzepatide claims in 2022", u)
+        self.assertIn("f_q1_", u)
+
+    def test_naive_non_empty(self) -> None:
+        s, u = build_prompts_naive(self.fake_row, self.q1)
+        self.assertIn("Internal Medicine", u)
+        self.assertIn("f_q1_", u)
+
+    def test_variant_production_and_a_use_method_a(self) -> None:
+        sa, ua = build_prompts_for_persona_variant("production", "A", self.fake_row, self.q1)
+        sb, ub = build_prompts_for_persona_variant("a", "A", self.fake_row, self.q1)
+        self.assertIn("2022 baseline", ua)
+        self.assertIn("Any tirzepatide claims in 2022", ub)
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ class TestResponsesSchema(unittest.TestCase):
         self.assertTrue(is_v2_survey_row(row))
         self.assertFalse(is_v2_survey_row({"npi": "1", "question_id": "q1", "method": "method_a"}))
 
-    def test_flatten(self) -> None:
+    def test_flatten_ignores_legacy_method_b_block(self) -> None:
         rows = [
             {
                 "schema_version": RESPONSE_ROW_SCHEMA_VERSION,
@@ -38,11 +38,23 @@ class TestResponsesSchema(unittest.TestCase):
             }
         ]
         flat = flatten_survey_rows(rows)
-        self.assertEqual(len(flat), 2)
-        self.assertEqual({(r["method"], r["question_id"], r["parsed_option"]) for r in flat}, {
-            ("method_a", "q1", "x"),
-            ("method_b", "q1", "y"),
-        })
+        self.assertEqual(len(flat), 1)
+        self.assertEqual(
+            {(r["method"], r["question_id"], r["parsed_option"]) for r in flat},
+            {("method_a", "q1", "x")},
+        )
+
+    def test_flatten_single_method(self) -> None:
+        rows = [
+            {
+                "schema_version": RESPONSE_ROW_SCHEMA_VERSION,
+                "npi": "100",
+                "method_a": {"q1": {"option_id": "x", "reasoning": "r1"}},
+            }
+        ]
+        flat = flatten_survey_rows(rows)
+        self.assertEqual(len(flat), 1)
+        self.assertEqual(flat[0]["method"], "method_a")
 
 
 if __name__ == "__main__":

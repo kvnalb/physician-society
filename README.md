@@ -1,6 +1,9 @@
 # Physician Society
 
-Tirzepatide / GLP-1 **physician persona simulation** demo: Medicare Part D–grounded cohort, LLM survey (methods A vs B), Cohen’s κ, and Streamlit readouts. Full narrative: [`docs/target_report.md`](docs/target_report.md).
+Tirzepatide / GLP-1 **physician persona simulation** demo: Medicare Part D–grounded cohort, **production** LLM persona
+(2022-only context in the prompt), **forward** survey (June 2022), and **hold-out** eval vs later Part D fields in the
+cohort TSV—plus Streamlit readouts. Full
+narrative: [`docs/target_report.md`](docs/target_report.md).
 
 ## Quick path (target demo)
 
@@ -16,7 +19,7 @@ make eval
 make demo
 ```
 
-`make eval` writes **`artifacts/demo/metrics.json`** and, when `data/output/runs/latest/` exists, also **`data/output/runs/latest/metrics.json`**, embedding **`run_manifest.json`** from that run when present. Use **Eval metrics snapshot** in Streamlit to compare runs. Metrics include **instrument health**, **distribution quality** (method A vs B marginal JS/TV), and **persona coherence** (cross-item rules); see [`eval/README.md`](eval/README.md). **Retest / order sensitivity:** [`docs/retest_stability.md`](docs/retest_stability.md) and `scripts/compare_runs_stability.py`. Optional **`--shuffle-questions`** on `run_batch` shuffles prompt block order (fixed `--shuffle-seed`).
+`make eval` writes **`artifacts/demo/metrics.json`** and, when `data/output/runs/latest/` exists, also **`data/output/runs/latest/metrics.json`**, embedding **`run_manifest.json`** from that run when present. Metrics include **hold-out alignment** (simulated vs Part D pseudo-labels), **distribution_quality** (cohort-level JS/TV vs pseudo marginals), **survey_marginals**, **instrument health**, and **persona coherence**; see [`eval/README.md`](eval/README.md). **Retest / order sensitivity:** [`docs/retest_stability.md`](docs/retest_stability.md) and `scripts/compare_runs_stability.py`. Optional **`--shuffle-questions`** on `run_batch` shuffles prompt block order (fixed `--shuffle-seed`).
 
 Static HTML bundle (Jinja): `make report-html` → open `docs/build/demo_report.html`.
 

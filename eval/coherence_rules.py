@@ -30,6 +30,8 @@ def coherence_violations_for_npi(
     out: List[dict[str, Any]] = []
     q3 = _get_answer(answers_by_qid, "q3_tirzepatide_prescribed")
     q4 = _get_answer(answers_by_qid, "q4_tirzepatide_adoption_speed")
+    if not q3 and not q4:
+        return out
 
     if q4 and q4 in _Q4_SPEED and q3 != _Q3_YES:
         out.append(
@@ -82,7 +84,7 @@ def compute_persona_coherence(
         if not is_v2_survey_row(r):
             continue
         npi = str(r.get("npi", ""))
-        for mk in ("method_a", "method_b"):
+        for mk in ("method_a",):
             block = r.get(mk)
             if not isinstance(block, dict) or not block:
                 continue

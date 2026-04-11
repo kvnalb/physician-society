@@ -36,11 +36,22 @@
         <div class="value">{{ summary.get('n_questions', '—') }}</div>
       </div>
       <div class="metric">
-        <div class="label">Mean κ (A vs B)</div>
+        <div class="label">Mean JS vs hold-out pseudo</div>
         <div class="value">
-          {% set kap = metrics.get('survey', {}).get('method_agreement_kappa_mean') %}
-          {% if kap is not none %}
-            {{ "%.3f"|format(kap) }}
+          {% set mjs = metrics.get('distribution_quality', {}).get('mean_js_sim_vs_holdout') %}
+          {% if mjs is not none %}
+            {{ "%.4f"|format(mjs) }}
+          {% else %}
+            —
+          {% endif %}
+        </div>
+      </div>
+      <div class="metric">
+        <div class="label">Hold-out match (mean)</div>
+        <div class="value">
+          {% set acc = metrics.get('behavioral_alignment', {}).get('mean_accuracy_over_labeled_questions') %}
+          {% if acc is not none %}
+            {{ "%.3f"|format(acc) }}
           {% else %}
             —
           {% endif %}
@@ -51,10 +62,6 @@
         <div class="value" style="font-size:1rem">{{ summary.get('model', '—') }}</div>
       </div>
     </section>
-    {% set stab = metrics.get('survey', {}).get('stability') %}
-    {% if stab %}
-    <p><strong>Stability:</strong> {{ stab }}</p>
-    {% endif %}
     <h2>Target report (markdown source)</h2>
     <article class="narrative">
       <pre>{{ narrative }}</pre>

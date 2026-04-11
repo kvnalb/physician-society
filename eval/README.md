@@ -1,9 +1,9 @@
 # Evaluation bundle
 
-- **`metrics.py`**: survey agreement (κ, method A vs B marginal JS/TV), `instrument_health`, `distribution_quality`, `persona_coherence` (cross-item rules), and optional `behavioral_alignment` vs claims-derived pseudo-labels.
-- **`behavioral_labels.py`**: pseudo-label mapping (`RULES_VERSION`).
-- **`coherence_rules.py`**: deterministic cross-item checks on parsed options.
-- **`instrument_health.py`**: parse/coverage/latency summaries from response JSONL.
+- **`metrics.py`**: **hold-out `behavioral_alignment`** (per-NPI match vs pseudo-labels from **post-2022** Part D fields), **`distribution_quality`** (cohort-level JS/TV between simulated answers and pseudo-label histograms), **`survey_marginals`** (per-item simulated answer histograms from the **method_a** stream), **`instrument_health`**, **`persona_coherence`**.
+- **`behavioral_labels.py`**: pseudo-label mapping for the **forward** survey (`RULES_VERSION`).
+- **`coherence_rules.py`**: deterministic cross-item checks (legacy q3/q4 rules apply only when those items exist).
+- **`instrument_health.py`**: parse/coverage/latency summaries from response JSONL (v2 **method_a** block).
 - **`run_eval.py`**: CLI to write `metrics.json`.
 
 ## Optional external reference marginals (deferred)

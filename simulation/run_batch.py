@@ -53,19 +53,15 @@ def _synthetic_survey_rows_v2(
     for _, row in cohort_df.iterrows():
         npi = str(row.get("npi", ""))
         method_a: Dict[str, Any] = {}
-        method_b: Dict[str, Any] = {}
         for q in questions:
             n_opt = len(q.options)
             if n_opt == 0:
                 continue
             h = int(hashlib.md5(f"{npi}|{q.question_id}".encode()).hexdigest(), 16)
             ia = h % n_opt
-            ib = (h + 1) % n_opt
             opt_a = q.options[ia].option_id
-            opt_b = q.options[ib].option_id
             reason = "Offline deterministic seed (no LLM call)."
             method_a[q.question_id] = {"option_id": opt_a, "reasoning": reason}
-            method_b[q.question_id] = {"option_id": opt_b, "reasoning": reason}
         rows.append(
             {
                 "schema_version": RESPONSE_ROW_SCHEMA_VERSION,
@@ -75,10 +71,9 @@ def _synthetic_survey_rows_v2(
                 "prompt_version": PROMPT_VERSION,
                 "temperature": temperature,
                 "method_a": method_a,
-                "method_b": method_b,
-                "raw_by_method": {"method_a": "", "method_b": ""},
-                "latency_ms_by_method": {"method_a": 0, "method_b": 0},
-                "survey_error_by_method": {"method_a": None, "method_b": None},
+                "raw_by_method": {"method_a": ""},
+                "latency_ms_by_method": {"method_a": 0},
+                "survey_error_by_method": {"method_a": None},
                 "cache_hit": False,
                 "offline_seed": True,
             }
@@ -120,7 +115,7 @@ def run_offline_seed_demo(
         persona_variant="offline_seed",
         model=model,
         temperature=temperature,
-        methods=["A", "B"],
+        methods=["A"],
         questions_spec="all",
         concurrency=1,
         limit_npis=limit_npis,
@@ -137,7 +132,7 @@ def run_offline_seed_demo(
             rows_out=rows_out,
             cohort_df=df,
             questions=questions,
-            methods=["A", "B"],
+            methods=["A"],
             model=model,
             n_llm_calls=0,
         )
@@ -521,25 +516,17 @@ def _write_demo_bundle(
     demo_dir.mkdir(parents=True, exist_ok=True)
 
     flat = flatten_survey_rows(rows_out)
-    # method_comparison: per question, distribution for method_a and method_b
-    by_q: Dict[str, Dict[str, Counter]] = defaultdict(lambda: {"method_a": Counter(), "method_b": Counter()})
+    by_q: Dict[str, Counter] = defaultdict(Counter)
     for r in flat:
         if not r.get("parsed_option"):
             continue
         qid = r["question_id"]
-        m = r["method"]
-        if m == "method_a":
-            by_q[qid]["method_a"][r["parsed_option"]] += 1
-        elif m == "method_b":
-            by_q[qid]["method_b"][r["parsed_option"]] += 1
+        if r["method"] == "method_a":
+            by_q[qid][r["parsed_option"]] += 1
 
-    method_comparison: Dict[str, Any] = {}
+    simulated_distributions: Dict[str, Any] = {}
     for q in questions:
-        d = by_q[q.question_id]
-        method_comparison[q.question_id] = {
-            "method_a_distribution": dict(d["method_a"]),
-            "method_b_distribution": dict(d["method_b"]),
-        }
+        simulated_distributions[q.question_id] = {"distribution": dict(by_q[q.question_id])}
 
     # adoption by archetype (empirical from cohort)
     actual_adoption: Dict[str, Any] = {}
@@ -551,7 +538,7 @@ def _write_demo_bundle(
     # sample_personas: merge a few NPIs with q1 answers
     npis = list(cohort_df["npi"].astype(str).head(10))
     sample_personas: List[Dict[str, Any]] = []
-    q1 = questions[0].question_id if questions else None
+    q_first = questions[0].question_id if questions else None
     for npi in npis:
         sub = cohort_df[cohort_df["npi"].astype(str) == npi]
         if sub.empty:
@@ -564,19 +551,16 @@ def _write_demo_bundle(
             "state": str(srow.get("state", "")),
             "adoption_archetype": str(srow.get("adoption_archetype", "")),
         }
-        if q1:
-            for mlabel, letter in [("q1_response_method_a", "a"), ("q1_response_method_b", "b")]:
-                hit = next(
-                    (
-                        r
-                        for r in flat
-                        if r["npi"] == npi
-                        and r["question_id"] == q1
-                        and r["method"] == f"method_{letter}"
-                    ),
-                    None,
-                )
-                entry[mlabel] = hit.get("parsed_option") if hit else None
+        if q_first:
+            hit = next(
+                (
+                    r
+                    for r in flat
+                    if r["npi"] == npi and r["question_id"] == q_first and r["method"] == "method_a"
+                ),
+                None,
+            )
+            entry["first_question_response_method_a"] = hit.get("parsed_option") if hit else None
         sample_personas.append(entry)
 
     summary = {
@@ -584,11 +568,11 @@ def _write_demo_bundle(
         "cohort_note": "Regenerate after tirzepatide_simulation_cohort_100.tsv is updated.",
         "n_npis": int(len(cohort_df)),
         "n_questions": len(questions),
-        "n_methods": len(methods),
+        "n_llm_calls": n_llm_calls,
         "model": model,
         "total_api_calls": n_llm_calls,
         "total_cost_usd": None,
-        "method_comparison": method_comparison,
+        "simulated_distributions": simulated_distributions,
         "adoption_by_archetype_actual": actual_adoption,
         "sample_personas": sample_personas,
     }
@@ -617,17 +601,16 @@ def main() -> None:
         "--run-id",
         type=str,
         default=None,
-        help="Subdirectory under data/output/runs/ (default: latest). E.g. v0_naive, v2_ab_rich.",
+        help="Subdirectory under data/output/runs/ (default: latest). E.g. v0_naive, smoke_test.",
     )
     p.add_argument("--limit-npis", type=int, default=None)
     p.add_argument("--questions", type=str, default="all", help="all or comma-separated question_ids")
-    p.add_argument("--method", type=str, default="both", choices=["A", "B", "both"])
     p.add_argument(
         "--persona-variant",
         type=str,
-        default="ab",
-        choices=["naive", "b", "a", "ab", "a_numeric"],
-        help="Prompting strategy: naive|b|a force single stream (method_a rows only); ab|a_numeric for A/B.",
+        default="production",
+        choices=["production", "naive", "a"],
+        help="production = 2022-only rich persona (default); naive = specialty/geo only; a = rich with 2022 tirzepatide line.",
     )
     p.add_argument("--concurrency", type=int, default=12, help="Parallel LLM calls (default 12).")
     p.add_argument(
@@ -659,7 +642,7 @@ def main() -> None:
     p.add_argument(
         "--offline-seed-demo",
         action="store_true",
-        help="No API: deterministic A/B responses from cohort + questions (for CI / missing keys)",
+        help="No API: deterministic single-stream responses from cohort + questions (for CI / missing keys)",
     )
     p.add_argument(
         "--write-demo-bundle",
@@ -699,14 +682,7 @@ def main() -> None:
         )
 
     pv = args.persona_variant.strip().lower()
-    if pv in ("naive", "b", "a"):
-        methods = ["A"]
-        if args.method != "A" and args.method != "both":
-            print("Note: naive/b/a variants emit a single stream labeled method_a; ignoring --method for list size.")
-    elif args.method == "both":
-        methods = ["A", "B"]
-    else:
-        methods = [args.method]
+    methods = ["A"]
 
     if args.provider == "together":
         key = get_api_key("together")

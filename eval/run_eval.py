@@ -48,13 +48,6 @@ def main() -> None:
         default=PROJECT_ROOT / "data" / "output" / "tirzepatide_simulation_cohort_100.tsv",
         help="Cohort TSV for behavioral pseudo-label alignment (skip if missing).",
     )
-    p.add_argument(
-        "--method-for-alignment",
-        type=str,
-        default="method_a",
-        choices=["method_a", "method_b"],
-        help="Which LLM method rows to score vs pseudo-labels.",
-    )
     args = p.parse_args()
 
     responses_path = resolve_responses_jsonl(args.responses_file) or args.responses_file
@@ -64,10 +57,9 @@ def main() -> None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         placeholder = {
             "error": "no_responses_file",
-            "survey": {
-                "method_agreement_kappa_mean": None,
+            "survey_marginals": {
+                "note": "No responses file; run simulation.run_batch.",
                 "per_question": {},
-                "stability": "No responses file found; run simulation.run_batch (writes responses__<model>.jsonl).",
             },
         }
         args.output.write_text(json.dumps(placeholder, indent=2), encoding="utf-8")
@@ -79,7 +71,6 @@ def main() -> None:
         responses_path,
         questions_yaml=args.questions_yaml,
         cohort_path=cohort_p,
-        method_for_alignment=args.method_for_alignment,
     )
 
     manifest_path = args.responses_file.parent / "run_manifest.json"
@@ -101,7 +92,6 @@ def main() -> None:
     bundle["eval_meta"] = {
         "responses_file": str(responses_path.resolve()),
         "cohort_path": cohort_rel,
-        "method_for_alignment": args.method_for_alignment,
         "questions_yaml": str(args.questions_yaml) if args.questions_yaml else None,
     }
 

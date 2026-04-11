@@ -226,116 +226,69 @@ def _render_sample_description(cohort_df: pd.DataFrame | None) -> None:
         )
 
 
-def _render_method_comparison_from_summary(mc: dict) -> None:
-    st.subheader("Simulated survey: rich profile vs segment-card prompt")
+def _distribution_from_summary_entry(dists: dict) -> dict[str, int]:
+    """Normalize new ``simulated_distributions`` and legacy ``method_comparison`` shapes."""
+    if "distribution" in dists:
+        raw = dists["distribution"]
+        return {str(k): int(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+    ma = dists.get("method_a_distribution")
+    return {str(k): int(v) for k, v in ma.items()} if isinstance(ma, dict) else {}
+
+
+def _render_simulated_distributions_from_summary(summary: dict) -> None:
+    st.subheader("Simulated survey (answer counts)")
     st.caption(
-        "**What this is:** side-by-side **answer counts** for each survey item—**Method A** (full Part D + Sunshine "
-        "profile in the prompt) vs **Method B** (exec-style segment card: specialty, home city/state, site line, "
-        "archetype + Sunshine band, geo bucket—**no** claim-level tables). "
-        "**Why it matters commercially:** if the two stories diverge sharply, **scenario outputs depend on how much "
-        "grounding you pay for**; if they align, a lighter briefing may be enough for early workshops."
+        "**What this is:** tally of **simulated choices** per survey item from the single **method_a** stream "
+        "(production, naive, or legacy rich **a** persona). **Why it matters:** shows the **scenario shape** your "
+        "workshop is built on before comparing to Medicare hold-out readouts."
     )
+    mc = summary.get("simulated_distributions") or summary.get("method_comparison") or {}
     if not mc:
-        st.info("No saved method comparison in `summary.json` yet—run a batch so the demo bundle includes counts.")
+        st.info("No saved distributions in `summary.json` yet—run a batch with `--save-as-demo-bundle`.")
         return
     for qid, dists in mc.items():
         title = _question_short_title(qid)
         labels = _option_labels_for_question(qid)
-        ma = dists.get("method_a_distribution") or {}
-        mb = dists.get("method_b_distribution") or {}
+        counts = _distribution_from_summary_entry(dists if isinstance(dists, dict) else {})
         with st.expander(title):
             st.caption(f"Internal id: `{qid}` — use the tables below, not raw option codes, when presenting.")
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**Method A — data-room style profile**")
-                st.dataframe(_dist_counts_to_df(ma, labels), hide_index=True, use_container_width=True)
-            with c2:
-                st.markdown("**Method B — segment card (ChatGPT-style briefing)**")
-                st.dataframe(_dist_counts_to_df(mb, labels), hide_index=True, use_container_width=True)
-
-
-def _render_survey_agreement_block(metrics: dict) -> None:
-    surv = metrics.get("survey") or {}
-    pq = surv.get("per_question") or {}
-    if not pq:
-        return
-    st.subheader("Agreement: same doctor, two prompt styles")
-    st.caption(
-        "**What this is:** for each survey item, **Cohen's κ** summarizes how often **Method A and Method B** pick "
-        "the **same answer** for the **same doctor** (paired rows). **JS / TV** describe how different the **overall** "
-        "answer mix is between methods. "
-        "**Why it matters:** low agreement means **your workshop narrative flips** depending on whether you used a "
-        "heavy claims brief or a light segment card—high agreement means the extra data may not change the headline "
-        "for that question."
-    )
-    rows = []
-    for qid, v in pq.items():
-        rows.append(
-            {
-                "Survey item": _question_short_title(qid),
-                "Paired doctors": v.get("n_paired"),
-                "Cohen κ (A vs B)": None if v.get("cohen_kappa") is None else round(float(v["cohen_kappa"]), 4),
-                "Scenario spread (JS)": None
-                if v.get("js_method_ab_marginal") is None
-                else round(float(v["js_method_ab_marginal"]), 4),
-                "Max category shift (TV)": None
-                if v.get("tv_method_ab_marginal") is None
-                else round(float(v["tv_method_ab_marginal"]), 4),
-            }
-        )
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-    stab = surv.get("stability")
-    if stab:
-        st.markdown(f"**Read of average agreement:** {stab}")
-    st.caption(
-        "**κ (kappa):** 0–1 would be strong alignment on categories; negative values mean **less overlap than chance** "
-        "on these labels—often a sign the two prompts push the model to **different plausible worlds**. "
-        "**JS** = Jensen–Shannon (0 = identical mix). **TV** = total variation (0–1; share of answers that would need "
-        "to move to match the other method's histogram)."
-    )
+            st.dataframe(_dist_counts_to_df(counts, labels), hide_index=True, use_container_width=True)
 
 
 def _render_distribution_quality_block(metrics: dict) -> None:
     dq = metrics.get("distribution_quality")
     if not isinstance(dq, dict):
         return
-    st.subheader("Distribution quality pillar (aggregate)")
+    st.subheader("Hold-out distribution match (simulated vs Part D pseudo)")
     pillar = dq.get("pillar", "")
     st.caption(
         (f"**Eval intent:** {pillar} " if pillar else "")
-        + "**Business translation:** this pillar is **not** “did we replicate a human panel?”—it asks whether **two "
-        "grounding budgets** (full profile vs segment card) produce **the same market-shape story** when you tally "
-        "simulated choices."
+        + "**Business translation:** low JS means the **shape of simulated forward answers** is close to the "
+        "**shape implied by later Medicare rows** (same cohort)—a cohort-level plausibility check, not human "
+        "validation."
     )
     c1, c2 = st.columns(2)
-    mjs = dq.get("mean_js_method_ab")
-    mtv = dq.get("mean_tv_method_ab")
-    c1.metric("Avg scenario spread (JS, across items)", f"{mjs:.4f}" if mjs is not None else "—")
-    c2.metric("Avg max category shift (TV, across items)", f"{mtv:.4f}" if mtv is not None else "—")
+    mjs = dq.get("mean_js_sim_vs_holdout")
+    mtv = dq.get("mean_tv_sim_vs_holdout")
+    c1.metric("Avg JS vs hold-out pseudo marginals", f"{mjs:.4f}" if mjs is not None else "—")
+    c2.metric("Avg TV vs hold-out pseudo marginals", f"{mtv:.4f}" if mtv is not None else "—")
 
 
 def _render_behavioral_alignment_block(metrics: dict) -> None:
     ba = metrics.get("behavioral_alignment")
     if not isinstance(ba, dict) or not ba.get("per_question"):
-        st.subheader("Behavioral check vs Medicare-derived hints")
-        st.caption(
-            "**What this would be:** how often simulated answers line up with **simple rules built from the same "
-            "doctor's claims row** (pseudo-labels—not a human truth panel). "
-            "**Why it matters:** if you pitch “grounded personas,” this is a **sanity check** that the model is not "
-            "systematically contradicting **observable prescribing cues**."
-        )
-        st.info("No `behavioral_alignment` block in this metrics file—usually because the cohort TSV was missing "
-                "when `eval.run_eval` ran, or the bundle is a placeholder.")
+        st.subheader("Hold-out alignment (June 2022 forward vs later Part D)")
+        st.info("No `behavioral_alignment` in this metrics file—usually the cohort TSV was missing when "
+                "`eval.run_eval` ran, or the bundle is a placeholder.")
         return
-    st.subheader("Behavioral check vs Medicare-derived hints")
+    st.subheader("Hold-out alignment (June 2022 forward vs later Part D)")
     note = ba.get("note", "")
     rules_v = ba.get("rules_version", "")
-    mfa = ba.get("method_for_alignment", "")
     st.caption(
-        f"**What this is:** match rate between **simulated answers** (here: **{mfa}**) and **claims-derived "
-        f"pseudo-labels** (rules version **{rules_v}**). {note} "
-        "**Why it matters commercially:** it is a **facing test** for “did we stay in the zip code of what Medicare "
-        "says about this prescriber?”—not proof of clinical accuracy."
+        "**What this is:** per-item **exact match rate** between **simulated** picks (``method_a`` stream) and "
+        f"**pseudo-labels** built from **post-2022** cohort columns (rules **{rules_v}**). {note} "
+        "**Why it matters:** tests whether **forward workshop answers** line up with **later administrative "
+        "outcomes** for the same doctors—**associational**, Part D–scoped."
     )
     m_acc = ba.get("mean_accuracy_over_labeled_questions")
     st.metric("Average match rate across labeled items", f"{m_acc:.3f}" if m_acc is not None else "—")
@@ -400,8 +353,8 @@ def _render_instrument_health_block(metrics: dict) -> None:
     st.subheader("Run & instrument health")
     st.caption(
         "**What this is:** **pipeline QA**—parse coverage, missing cells, API errors, latency—straight from the "
-        "response JSONL. **Why it matters:** before you interpret κ or segment charts, you need to know whether the "
-        "run was **complete, slow, or partially broken** (e.g. missing answers for one method)."
+        "response JSONL. **Why it matters:** before you interpret hold-out charts, confirm the run was **complete** "
+        "and not dominated by parse errors."
     )
     lat = ih.get("latency_ms") or {}
     summary_rows = [
@@ -431,18 +384,22 @@ def _render_eval_coverage_sidebar(metrics: dict) -> None:
     with st.expander("Eval bundle coverage (what this file contains)"):
         st.caption("Each row ties to **`eval/metrics.py` → `compute_metrics_bundle`**.")
         rows = [
-            {"Block": "survey", "Present": bool(metrics.get("survey")), "Role": "A vs B agreement + per-item stats"},
+            {
+                "Block": "survey_marginals",
+                "Present": bool(metrics.get("survey_marginals")),
+                "Role": "Per-item simulated answer histograms (method_a)",
+            },
             {
                 "Block": "distribution_quality",
                 "Present": bool(metrics.get("distribution_quality")),
-                "Role": "Aggregate JS/TV summary for A vs B marginals",
+                "Role": "JS/TV: simulated vs hold-out pseudo marginals",
             },
             {"Block": "persona_coherence", "Present": bool(metrics.get("persona_coherence")), "Role": "Cross-item rule violations"},
             {"Block": "instrument_health", "Present": bool(metrics.get("instrument_health")), "Role": "Parse/coverage/latency QA"},
             {
                 "Block": "behavioral_alignment",
                 "Present": bool(metrics.get("behavioral_alignment")),
-                "Role": "Match to claims-derived pseudo-labels (needs cohort at eval time)",
+                "Role": "Per-NPI match vs hold-out pseudo-labels (needs cohort at eval time)",
             },
             {"Block": "run_manifest", "Present": bool(metrics.get("run_manifest")), "Role": "Pinned batch settings (if saved)"},
             {"Block": "eval_meta", "Present": bool(metrics.get("eval_meta")), "Role": "Paths + options used when metrics were built"},
@@ -492,11 +449,11 @@ def main() -> None:
         Internal Medicine / Family Medicine only**, with **2022→2023 Part D** linked for **revealed**
         tirzepatide/GLP-1 patterns. See `docs/target_report.md` for scope conditions.
 
-        **Methods.** **Method A** = LLM persona with **full Part D + Sunshine “data room”** context in the prompt.
-        **Method B** = **exec-style segment card** (specialty, home city/state, registry site line, adoption-style tag,
-        Sunshine band, priority-metro bucket)—**not** claim-by-claim tables. **Eval** = agreement between those two
-        elicitation styles, **distribution** checks, **coherence** rules, **instrument health**, and optional
-        **claims-hint alignment**—plus **empirical** adoption baselines from Part D (not causal).
+        **Persona & eval.** Default **`production`** persona = **Medicare Part D + Open Payments through CY2022**
+        (no 2023 outcomes in the prompt; no 2022 tirzepatide yes/no line). The survey asks **June 2022 forward**
+        judgments; **eval** compares answers to **pseudo-labels from later Part D fields** in the cohort TSV
+        (hold-out style). **Coherence** and **instrument health** are QA layers; revealed adoption chart is
+        **descriptive only** (not causal).
         """
     )
 
@@ -554,30 +511,26 @@ def main() -> None:
 
     st.subheader("Executive snapshot")
     st.caption(
-        "**What this row is:** a **one-glance** view of run size, **cross-prompt agreement** (κ), **shape gap** "
-        "between methods (JS), **facing vs claims hints** (when present), **story consistency** (coherence violation "
-        "rate), and **data completeness** (missing cells). **Why:** executives should see **trust + stability** "
-        "signals before diving into tables."
+        "**What this row is:** run size, **hold-out shape gap** (JS vs Medicare pseudo marginals), **per-item exact "
+        "match** to hold-out labels, **coherence** violations, and **missing cells**. **Why:** quick read on "
+        "**scenario credibility vs later Part D** plus pipeline health."
     )
-    surv = metrics.get("survey", {}) if metrics else {}
     dq = metrics.get("distribution_quality") if metrics else {}
     ba = metrics.get("behavioral_alignment") if metrics else {}
     pc = metrics.get("persona_coherence") if metrics else {}
     ih = metrics.get("instrument_health") if metrics else {}
 
-    kappa = surv.get("method_agreement_kappa_mean")
-    mjs = dq.get("mean_js_method_ab") if isinstance(dq, dict) else None
+    mjs = dq.get("mean_js_sim_vs_holdout") if isinstance(dq, dict) else None
     m_acc = ba.get("mean_accuracy_over_labeled_questions") if isinstance(ba, dict) else None
     vr = pc.get("violation_rate_per_method_block") if isinstance(pc, dict) else None
     miss = ih.get("flat_cells_missing_option") if isinstance(ih, dict) else None
 
-    e1, e2, e3, e4, e5, e6 = st.columns(6)
+    e1, e2, e3, e4, e5 = st.columns(5)
     e1.metric("Doctors in demo summary", summary.get("n_npis", "—"))
     e2.metric("Survey items in battery", summary.get("n_questions", "—"))
-    e3.metric("Avg κ (A vs B)", f"{kappa:.3f}" if kappa is not None else "—")
-    e4.metric("Avg scenario spread (JS)", f"{mjs:.4f}" if mjs is not None else "—")
-    e5.metric("Avg match vs claims hints", f"{m_acc:.3f}" if m_acc is not None else "—")
-    e6.metric("Coherence violation rate", f"{vr:.3f}" if vr is not None else "—")
+    e3.metric("Avg JS vs hold-out pseudo", f"{mjs:.4f}" if mjs is not None else "—")
+    e4.metric("Avg match vs claims hints", f"{m_acc:.3f}" if m_acc is not None else "—")
+    e5.metric("Coherence violation rate", f"{vr:.3f}" if vr is not None else "—")
     if miss is not None:
         st.metric("Missing answer cells (run health)", int(miss))
 
@@ -593,8 +546,7 @@ def main() -> None:
     em = metrics.get("eval_meta")
     if isinstance(em, dict) and em:
         with st.expander("Eval build metadata"):
-            st.caption("**What / why:** which responses path and alignment method were used when `run_eval` produced "
-                       "this JSON.")
+            st.caption("**What / why:** which responses path and cohort were used when `run_eval` produced this JSON.")
             st.json(em)
 
     st.markdown("---")
@@ -631,9 +583,7 @@ def main() -> None:
     else:
         st.warning("No cohort or summary data for adoption-by-archetype chart.")
 
-    _render_method_comparison_from_summary(summary.get("method_comparison") or {})
-
-    _render_survey_agreement_block(metrics)
+    _render_simulated_distributions_from_summary(summary)
     _render_distribution_quality_block(metrics)
     _render_behavioral_alignment_block(metrics)
     _render_persona_coherence_block(metrics)
@@ -664,7 +614,7 @@ def main() -> None:
     if live:
         key_label = "TOGETHER_API_KEY" if smoke_provider == "together" else "OPENAI_API_KEY"
         api_key = st.text_input(key_label, type="password", help="Used only in this browser session.")
-        if st.button("Smoke re-run (5 NPIs, all questions, both methods)"):
+        if st.button("Smoke re-run (5 NPIs, all questions, production persona)"):
             if not api_key:
                 st.error("Enter an API key.")
             else:
@@ -683,7 +633,7 @@ def main() -> None:
                     "--run-id",
                     "streamlit_smoke",
                     "--persona-variant",
-                    "ab",
+                    "production",
                     "--concurrency",
                     "4",
                     "--limit-npis",

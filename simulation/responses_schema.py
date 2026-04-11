@@ -22,7 +22,7 @@ def is_v2_survey_row(row: Mapping[str, Any]) -> bool:  # noqa: UP006
         return True
     if row.get("question_id") is not None:
         return False
-    return isinstance(row.get("method_a"), dict) or isinstance(row.get("method_b"), dict)
+    return isinstance(row.get("method_a"), dict)
 
 
 def flatten_survey_rows(rows: List[dict[str, Any]]) -> List[dict[str, Any]]:
@@ -37,7 +37,7 @@ def flatten_survey_rows(rows: List[dict[str, Any]]) -> List[dict[str, Any]]:
             continue
         npi = str(r["npi"])
         err_by = r.get("survey_error_by_method") or {}
-        for mk in ("method_a", "method_b"):
+        for mk in ("method_a",):
             block = r.get(mk)
             if not isinstance(block, dict):
                 continue
@@ -60,15 +60,15 @@ def flatten_survey_rows(rows: List[dict[str, Any]]) -> List[dict[str, Any]]:
 
 def resolve_responses_jsonl(requested: Path) -> Optional[Path]:
     """
-    If ``requested`` exists, return it. If it is the legacy ``responses.jsonl`` path
-    but missing, try ``run_manifest.json`` → ``responses_filename``, then any
-    ``responses__*.jsonl`` in the same directory.
+    Resolve the canonical responses file for a run directory.
+
+    If ``requested`` is ``responses.jsonl`` **and** ``run_manifest.json`` names a different
+    ``responses_filename`` that exists (typical v2: ``responses__<model>.jsonl``), return the
+    manifest path so stale legacy flat ``responses.jsonl`` files do not shadow the real run.
+    If ``responses.jsonl`` is missing, fall back to manifest → newest ``responses__*.jsonl``.
     """
-    if requested.is_file():
-        return requested
-    if requested.name != "responses.jsonl":
-        return None
     parent = requested.parent
+    manifest_cand: Optional[Path] = None
     mf = parent / "run_manifest.json"
     if mf.is_file():
         try:
@@ -77,8 +77,22 @@ def resolve_responses_jsonl(requested: Path) -> Optional[Path]:
             data = {}
         fn = data.get("responses_filename")
         if isinstance(fn, str) and fn.strip():
-            cand = parent / fn.strip()
-            if cand.is_file():
-                return cand
+            p = parent / fn.strip()
+            if p.is_file():
+                manifest_cand = p
+
+    if requested.is_file():
+        if (
+            requested.name == "responses.jsonl"
+            and manifest_cand is not None
+            and manifest_cand.resolve() != requested.resolve()
+        ):
+            return manifest_cand
+        return requested
+
+    if requested.name != "responses.jsonl":
+        return None
+    if manifest_cand is not None:
+        return manifest_cand
     globs = sorted(parent.glob("responses__*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     return globs[0] if globs else None

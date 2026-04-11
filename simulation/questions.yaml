@@ -1,91 +1,77 @@
-# Single-select survey for prescriber personas. option_id must match LLM output line 1.
+# Forward-looking survey (June 2022 information set). option_id must match LLM JSON output.
+# Eval pseudo-labels use Part D (and related) fields AFTER 2022 — see eval/behavioral_labels.py.
 questions:
-  - question_id: q1_second_line_agent
+  - question_id: f_q1_tirzepatide_12m
     text: >
-      After metformin for type 2 diabetes, which class do you most often reach for as the
-      typical next pharmacologic step for appropriate patients (June 2022, U.S. practice)?
+      It is June 2022; tirzepatide (Mounjaro) is newly available for type 2 diabetes in the U.S.
+      Looking ahead over the next 12 months, what do you expect your own Medicare Part D prescribing
+      to look like for appropriate patients?
     options:
-      - option_id: q1_glp1
-        label: GLP-1 receptor agonist (injectable or oral)
-      - option_id: q1_sglt2
-        label: SGLT2 inhibitor
-      - option_id: q1_dpp4
-        label: DPP-4 inhibitor
-      - option_id: q1_su
-        label: Sulfonylurea or meglitinide
-      - option_id: q1_insulin
-        label: Basal or other insulin (non-intensified)
-      - option_id: q1_other
-        label: Other / case-by-case / no dominant pattern
+      - option_id: f_q1_expect_active
+        label: I expect to use it actively for suitable patients
+      - option_id: f_q1_expect_selective
+        label: Selective / pilot use in a subset first
+      - option_id: f_q1_expect_unlikely
+        label: Unlikely I will prescribe in that window
+      - option_id: f_q1_unsure
+        label: Too uncertain (access, evidence, formulary)
 
-  - question_id: q2_glp1_panel_share
+  - question_id: f_q2_glp1_trajectory
     text: >
-      Roughly what share of your Medicare Part D type 2 diabetes panel is on any GLP-1
-      agent (including semaglutide, dulaglutide, liraglutide, etc.) as of 2022?
+      Over the next program year (into 2023), how do you expect the share of your Medicare Part D
+      type 2 diabetes patients on any GLP-1 agent to change?
     options:
-      - option_id: q2_lt5
-        label: Under 5%
-      - option_id: q2_5_15
-        label: 5% to under 15%
-      - option_id: q2_15_30
-        label: 15% to under 30%
-      - option_id: q2_30_50
-        label: 30% to under 50%
-      - option_id: q2_50p
-        label: 50% or more
+      - option_id: f_q2_up
+        label: Increase meaningfully
+      - option_id: f_q2_flat
+        label: Stay about the same
+      - option_id: f_q2_down
+        label: Decrease meaningfully
 
-  - question_id: q3_tirzepatide_prescribed
+  - question_id: f_q3_branded_trajectory
     text: >
-      Have you prescribed tirzepatide (dual GIP/GLP-1) for any appropriate type 2 diabetes
-      patients since it became available (context: mid-2022)?
+      Over the next program year (into 2023), how do you expect your branded share among Part D
+      oral diabetes agents (where clinically relevant) to move?
     options:
-      - option_id: q3_yes
-        label: Yes
-      - option_id: q3_no_not_yet
-        label: Not yet, but planning to evaluate
-      - option_id: q3_no_unlikely
-        label: No, unlikely in the near term
-      - option_id: q3_unsure
-        label: Unsure / not applicable to my panel
+      - option_id: f_q3_up
+        label: Shift toward more branded use
+      - option_id: f_q3_flat
+        label: About the same mix
+      - option_id: f_q3_down
+        label: Shift toward more generic use
 
-  - question_id: q4_tirzepatide_adoption_speed
+  - question_id: f_q4_diabetes_mix_trajectory
     text: >
-      If you use or plan to use tirzepatide, how would you describe your typical adoption speed
-      for that agent relative to other new diabetes therapies?
+      Looking into the next data year, how do you expect your diabetes-related share of Part D
+      prescribing (for the patients you treat) to move?
     options:
-      - option_id: q4_early
-        label: Early — among the first in my practice to try when evidence and access align
-      - option_id: q4_mainstream
-        label: Mainstream — adopt once guidelines/payers/peers catch up
-      - option_id: q4_late
-        label: Late / cautious — wait for longer track record or broader access
-      - option_id: q4_na
-        label: Not applicable (not prescribing tirzepatide)
+      - option_id: f_q4_up
+        label: Diabetes mix increases meaningfully
+      - option_id: f_q4_flat
+        label: About the same
+      - option_id: f_q4_down
+        label: Diabetes mix decreases meaningfully
 
-  - question_id: q5_branded_vs_generic
+  - question_id: f_q5_panel_scale_trajectory
     text: >
-      For oral diabetes agents where a generic exists, what is your usual default when
-      clinically equivalent options exist?
+      Relative to your 2022 baseline, how do you expect your overall Medicare Part D prescribing
+      activity (claim rows) to trend over the next year?
     options:
-      - option_id: q5_prefer_branded
-        label: Prefer branded when payer allows
-      - option_id: q5_prefer_generic
-        label: Prefer generic when available
-      - option_id: q5_no_pref
-        label: No strong preference — patient cost and formulary decide
-      - option_id: q5_case_by_case
-        label: Entirely case-by-case
+      - option_id: f_q5_up
+        label: Meaningfully more Part D activity
+      - option_id: f_q5_flat
+        label: Roughly similar scale
+      - option_id: f_q5_down
+        label: Meaningfully less Part D activity
 
-  - question_id: q6_diabetes_drug_count
+  - question_id: f_q6_molecule_breadth_trajectory
     text: >
-      Roughly how many distinct diabetes-relevant medication names (classes/agents) do you
-      prescribe regularly across your panel?
+      Over the next year, how do you expect the breadth of distinct diabetes-relevant molecules
+      you touch in Part D to change?
     options:
-      - option_id: q6_1_5
-        label: 1–5
-      - option_id: q6_6_10
-        label: 6–10
-      - option_id: q6_11_20
-        label: 11–20
-      - option_id: q6_20p
-        label: More than 20
+      - option_id: f_q6_up
+        label: Broader / more distinct molecules
+      - option_id: f_q6_flat
+        label: About the same breadth
+      - option_id: f_q6_down
+        label: Narrower / fewer distinct molecules

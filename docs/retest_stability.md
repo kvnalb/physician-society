@@ -12,6 +12,6 @@ python scripts/compare_runs_stability.py \
   --run-b data/output/runs/run_b/responses__MODEL.jsonl
 ```
 
-The script prints **item agreement rate** and a split by `method_a` / `method_b`. Interpret as **stochastic stability** of the joint survey completion, not human accuracy.
+The script prints **item agreement rate** and a split by **method** key (typically `method_a` only). Interpret as **stochastic stability** of the joint survey completion, not human accuracy.
 
 For **order sensitivity**, run one batch with default question order and one with `--shuffle-questions --shuffle-seed 1`, then compare the same way on a small `--limit-npis` subset.

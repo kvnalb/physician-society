@@ -1,16 +1,15 @@
-"""Survey agreement, behavioral pseudo-label alignment, and distribution distance."""
+"""Hold-out pseudo-label alignment, simulated marginals, distribution distance, coherence."""
 
 from __future__ import annotations
 
 import json
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 from scipy.special import rel_entr
-from sklearn.metrics import cohen_kappa_score
 
 from eval.behavioral_labels import RULES_VERSION, pseudo_label_for_question
 from eval.coherence_rules import compute_persona_coherence
@@ -34,92 +33,37 @@ def _load_jsonl_flat(path: Path) -> List[dict[str, Any]]:
     return flatten_survey_rows(_load_jsonl(path))
 
 
-def compute_survey_agreement(
+def compute_survey_marginals(
     responses_jsonl: Path,
     questions_yaml: Path | None = None,
 ) -> dict[str, Any]:
+    """
+    Per-question counts of simulated answers (single stream; flattened ``method_a`` rows only).
+    """
     rows = _load_jsonl_flat(responses_jsonl)
     questions = load_questions(questions_yaml)
-
-    by_pair: Dict[Tuple[str, str], Dict[str, str]] = {}
-    for r in rows:
-        opt = r.get("parsed_option")
-        if not opt or r.get("error"):
-            continue
-        npi = str(r["npi"])
-        qid = str(r["question_id"])
-        method = str(r["method"])
-        key = (npi, qid)
-        if key not in by_pair:
-            by_pair[key] = {}
-        by_pair[key][method] = opt
-
     per_question: Dict[str, Any] = {}
-    kappas: List[float] = []
 
     for q in questions:
-        ya: List[str] = []
-        yb: List[str] = []
-        dist_a: Counter[str] = Counter()
-        dist_b: Counter[str] = Counter()
-        for (npi, qid), methods in by_pair.items():
-            if qid != q.question_id:
+        dist: Counter[str] = Counter()
+        for r in rows:
+            if str(r.get("method", "")).lower() != "method_a":
                 continue
-            a = methods.get("method_a")
-            b = methods.get("method_b")
-            if a is None or b is None:
+            if r.get("question_id") != q.question_id:
                 continue
-            ya.append(a)
-            yb.append(b)
-            dist_a[a] += 1
-            dist_b[b] += 1
-
-        option_ids = [o.option_id for o in q.options]
-        na = sum(dist_a.values())
-        nb = sum(dist_b.values())
-        js_ab: Optional[float] = None
-        tv_ab: Optional[float] = None
-        if na and nb:
-            p_a = {k: dist_a.get(k, 0) / na for k in option_ids}
-            p_b = {k: dist_b.get(k, 0) / nb for k in option_ids}
-            js_ab = _js_divergence(p_a, p_b, option_ids)
-            tv_ab = _tv_distance(p_a, p_b, option_ids)
-
+            opt = r.get("parsed_option")
+            if not opt or r.get("error"):
+                continue
+            dist[str(opt)] += 1
+        n = int(sum(dist.values()))
         per_question[q.question_id] = {
-            "n_paired": len(ya),
-            "method_a_dist": dict(dist_a),
-            "method_b_dist": dict(dist_b),
-            "js_method_ab_marginal": js_ab,
-            "tv_method_ab_marginal": tv_ab,
+            "n_responses": n,
+            "response_distribution": dict(dist),
         }
-        if len(ya) >= 2 and len(set(ya + yb)) > 0:
-            try:
-                k = float(cohen_kappa_score(ya, yb))
-                per_question[q.question_id]["cohen_kappa"] = k
-                kappas.append(k)
-            except ValueError:
-                per_question[q.question_id]["cohen_kappa"] = None
-        else:
-            per_question[q.question_id]["cohen_kappa"] = None
 
-    mean_kappa = sum(kappas) / len(kappas) if kappas else None
-    if mean_kappa is None:
-        stability = "Insufficient paired Method A/B responses to assess agreement."
-    elif mean_kappa < 0.2:
-        stability = "Methods A and B show weak agreement (low Cohen's kappa on average)."
-    elif mean_kappa < 0.5:
-        stability = "Methods A and B show moderate agreement on average."
-    else:
-        stability = "Methods A and B show relatively strong agreement on average."
-
-    js_vals = [v["js_method_ab_marginal"] for v in per_question.values() if v.get("js_method_ab_marginal") is not None]
-    tv_vals = [v["tv_method_ab_marginal"] for v in per_question.values() if v.get("tv_method_ab_marginal") is not None]
     return {
-        "method_agreement_kappa_mean": mean_kappa,
+        "note": "Single-stream simulated marginals (v2 ``method_a`` survey block only).",
         "per_question": per_question,
-        "stability": stability,
-        "method_marginal_divergence_mean_js": sum(js_vals) / len(js_vals) if js_vals else None,
-        "method_marginal_divergence_mean_tv": sum(tv_vals) / len(tv_vals) if tv_vals else None,
     }
 
 
@@ -145,20 +89,16 @@ def compute_behavioral_alignment(
     cohort_path: Path,
     *,
     questions_yaml: Path | None = None,
-    method_for_alignment: str = "method_a",
 ) -> dict[str, Any]:
     """
-    Compare LLM picks to claims-derived pseudo-labels for the same NPI.
-    method_for_alignment: 'method_a' or 'method_b' (filters JSONL rows).
+    Compare LLM picks (``method_a`` rows) to claims-derived pseudo-labels for the same NPI (hold-out fields).
     """
     questions = load_questions(questions_yaml)
     cohort_df = pd.read_csv(cohort_path, sep="\t", low_memory=False, dtype={"npi": str})
     cohort_by_npi = {str(r["npi"]): r for _, r in cohort_df.iterrows()}
 
     rows = _load_jsonl_flat(responses_jsonl)
-    want_method = method_for_alignment.strip().lower()
-    if want_method not in ("method_a", "method_b"):
-        raise ValueError("method_for_alignment must be method_a or method_b")
+    want_method = "method_a"
 
     per_q: Dict[str, Any] = {}
     accuracies: List[float] = []
@@ -213,29 +153,50 @@ def compute_behavioral_alignment(
     mean_acc = sum(accuracies) / len(accuracies) if accuracies else None
     return {
         "rules_version": RULES_VERSION,
-        "method_for_alignment": want_method,
         "mean_accuracy_over_labeled_questions": mean_acc,
         "per_question": per_q,
-        "note": "Pseudo-labels are claims-derived heuristics, not human survey responses.",
+        "note": (
+            "Pseudo-labels use **post-2022** Part D (and related) fields in the cohort TSV, not human surveys. "
+            "Production personas must **exclude** those fields from the LLM prompt when interpreting alignment."
+        ),
     }
 
 
-def _distribution_quality_block(survey: dict[str, Any]) -> dict[str, Any]:
-    pq = survey.get("per_question") or {}
+def _distribution_quality_from_holdout(behavioral: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize cohort-level JS/TV between simulated answers and hold-out pseudo marginals."""
+    if not behavioral or not behavioral.get("per_question"):
+        return {
+            "pillar": "Simulated vs Part D hold-out pseudo marginals (per question).",
+            "mean_js_sim_vs_holdout": None,
+            "mean_tv_sim_vs_holdout": None,
+            "per_question": {},
+        }
+    pq = behavioral["per_question"]
     rows = []
+    js_vals: List[float] = []
+    tv_vals: List[float] = []
     for qid, v in pq.items():
+        js = v.get("js_divergence_marginal")
+        tv = v.get("tv_distance_marginal")
+        if js is not None:
+            js_vals.append(float(js))
+        if tv is not None:
+            tv_vals.append(float(tv))
         rows.append(
             {
                 "question_id": qid,
-                "js_method_ab_marginal": v.get("js_method_ab_marginal"),
-                "tv_method_ab_marginal": v.get("tv_method_ab_marginal"),
-                "n_paired": v.get("n_paired"),
+                "js_sim_vs_holdout": js,
+                "tv_sim_vs_holdout": tv,
+                "n_labeled": v.get("n_labeled"),
             }
         )
     return {
-        "pillar": "Method A vs method B marginal distributions per question (not human-panel replication).",
-        "mean_js_method_ab": survey.get("method_marginal_divergence_mean_js"),
-        "mean_tv_method_ab": survey.get("method_marginal_divergence_mean_tv"),
+        "pillar": (
+            "Cohort-level distance between **simulated** answer histograms and **hold-out** "
+            "pseudo-label histograms built from post-2022 Medicare fields."
+        ),
+        "mean_js_sim_vs_holdout": sum(js_vals) / len(js_vals) if js_vals else None,
+        "mean_tv_sim_vs_holdout": sum(tv_vals) / len(tv_vals) if tv_vals else None,
         "per_question": {r["question_id"]: r for r in rows},
     }
 
@@ -245,22 +206,23 @@ def compute_metrics_bundle(
     *,
     questions_yaml: Path | None = None,
     cohort_path: Path | None = None,
-    method_for_alignment: str = "method_a",
 ) -> dict[str, Any]:
-    survey = compute_survey_agreement(responses_jsonl, questions_yaml)
+    survey_marginals = compute_survey_marginals(responses_jsonl, questions_yaml)
+    behavioral: Optional[dict[str, Any]] = None
+    if cohort_path is not None and cohort_path.is_file():
+        behavioral = compute_behavioral_alignment(
+            responses_jsonl,
+            cohort_path,
+            questions_yaml=questions_yaml,
+        )
     out: Dict[str, Any] = {
-        "survey": survey,
+        "survey_marginals": survey_marginals,
         "instrument_health": compute_instrument_health(responses_jsonl, questions_yaml=questions_yaml),
-        "distribution_quality": _distribution_quality_block(survey),
+        "distribution_quality": _distribution_quality_from_holdout(behavioral),
     }
     questions = load_questions(questions_yaml)
     qids = [q.question_id for q in questions]
     out["persona_coherence"] = compute_persona_coherence(load_raw_response_rows(responses_jsonl), question_ids=qids)
-    if cohort_path is not None and cohort_path.is_file():
-        out["behavioral_alignment"] = compute_behavioral_alignment(
-            responses_jsonl,
-            cohort_path,
-            questions_yaml=questions_yaml,
-            method_for_alignment=method_for_alignment,
-        )
+    if behavioral is not None:
+        out["behavioral_alignment"] = behavioral
     return out
