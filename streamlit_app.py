@@ -17,6 +17,10 @@ import streamlit as st
 from simulation.env_bootstrap import load_local_dotenv
 from simulation.questions_io import Question, load_questions
 
+# -----------------------------------------------------------------------------
+# Paths and defaults
+# -----------------------------------------------------------------------------
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 QUESTIONS_YAML = PROJECT_ROOT / "simulation" / "questions.yaml"
 SUMMARY_PATH = PROJECT_ROOT / "artifacts" / "demo" / "summary.json"
@@ -36,6 +40,11 @@ _EXPANDER_LABELS_BY_QID: dict[str, str] = {
     "f_q5_panel_scale_trajectory": "Q5 — Overall Part D activity scale vs 2022 baseline",
     "f_q6_molecule_breadth_trajectory": "Q6 — Breadth of diabetes-relevant molecules (Part D)",
 }
+
+
+# -----------------------------------------------------------------------------
+# Shared UI primitives (used across sections)
+# -----------------------------------------------------------------------------
 
 
 def _inject_page_styles() -> None:
@@ -81,8 +90,9 @@ def _muted_md(body_markdown: str) -> None:
     st.markdown(f'<div class="ps-muted">{body_markdown}</div>', unsafe_allow_html=True)
 
 
-def _expander_label(qid: str) -> str:
-    return _EXPANDER_LABELS_BY_QID.get(qid, _question_short_title(qid, max_len=96))
+# -----------------------------------------------------------------------------
+# Survey YAML helpers (questions, expander labels, option text)
+# -----------------------------------------------------------------------------
 
 
 @lru_cache(maxsize=1)
@@ -105,11 +115,20 @@ def _question_short_title(qid: str, max_len: int = 120) -> str:
     return t if len(t) <= max_len else t[: max_len - 1] + "…"
 
 
+def _expander_label(qid: str) -> str:
+    return _EXPANDER_LABELS_BY_QID.get(qid, _question_short_title(qid, max_len=96))
+
+
 def _option_labels_for_question(qid: str) -> dict[str, str]:
     q = _question_by_id(qid)
     if not q:
         return {}
     return {o.option_id: o.label for o in q.options}
+
+
+# -----------------------------------------------------------------------------
+# Small formatters and table builders
+# -----------------------------------------------------------------------------
 
 
 def _pretty_geo_cluster(raw: object) -> str:
@@ -126,6 +145,30 @@ def _pretty_geo_cluster(raw: object) -> str:
 
 def _pretty_archetype(raw: object) -> str:
     return str(raw).strip().replace("_", " ") or "—"
+
+
+def _dist_counts_to_df(dist: dict[str, int] | None, labels: dict[str, str]) -> pd.DataFrame:
+    if not dist:
+        return pd.DataFrame(columns=["Answer choice", "Simulated count"])
+    rows = [
+        {"Answer choice": labels.get(k, k), "Simulated count": int(v)}
+        for k, v in sorted(dist.items(), key=lambda x: -x[1])
+    ]
+    return pd.DataFrame(rows)
+
+
+def _distribution_from_summary_entry(dists: dict) -> dict[str, int]:
+    """Normalize new ``simulated_distributions`` and legacy ``method_comparison`` shapes."""
+    if "distribution" in dists:
+        raw = dists["distribution"]
+        return {str(k): int(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+    ma = dists.get("method_a_distribution")
+    return {str(k): int(v) for k, v in ma.items()} if isinstance(ma, dict) else {}
+
+
+# -----------------------------------------------------------------------------
+# File I / O and metrics discovery
+# -----------------------------------------------------------------------------
 
 
 def _load_json(path: Path) -> dict:
@@ -180,17 +223,74 @@ def _cohort_adoption_by_archetype(df: pd.DataFrame | None) -> dict:
     return out
 
 
-def _dist_counts_to_df(dist: dict[str, int] | None, labels: dict[str, str]) -> pd.DataFrame:
-    if not dist:
-        return pd.DataFrame(columns=["Answer choice", "Simulated count"])
-    rows = [
-        {"Answer choice": labels.get(k, k), "Simulated count": int(v)}
-        for k, v in sorted(dist.items(), key=lambda x: -x[1])
-    ]
-    return pd.DataFrame(rows)
+# =============================================================================
+# Report layout: functions below follow on-page order (top → bottom).
+# Sidebar is listed first because Streamlit executes it before the main column.
+# =============================================================================
+
+
+def _render_sidebar_smoke_settings() -> tuple[str, str, float, str]:
+    """Optional live batch controls (values consumed later in Advanced)."""
+    with st.sidebar:
+        st.header("Optional live model smoke test")
+        st.caption(
+            "Runs only if you use **Advanced → Re-run with live API**. Settings apply to this browser session only "
+            "and are not saved."
+        )
+        smoke_provider = st.selectbox(
+            "LLM provider",
+            ["together", "openai"],
+            index=0,
+            help="together uses the native Together SDK; openai uses the OpenAI Python client (optional base URL).",
+        )
+        smoke_model = st.text_input(
+            "Model",
+            value=DEFAULT_TOGETHER_MODEL,
+            help="Together model id by default; use e.g. gpt-4o-mini with OpenAI provider.",
+        )
+        smoke_temp = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.2, step=0.05)
+        smoke_base_url = st.text_input(
+            "API base URL (optional)",
+            value="",
+            help="Only for OpenAI provider: e.g. https://api.together.xyz/v1 for OpenAI-compatible endpoints.",
+        )
+    return smoke_provider, smoke_model, smoke_temp, smoke_base_url
+
+
+def _render_title_block() -> None:
+    """Main page title and subtitle (first visible content in the main column)."""
+    st.title("Tirzepatide adoption simulation")
+    st.caption(
+        "Novo Nordisk-style six-week decision framing (June 2022) — Medicare Part D–scoped physician proof of "
+        "concept (POC)."
+    )
+
+
+def _render_about_section() -> None:
+    st.header("About")
+    st.markdown(
+        """
+        **Problem.** At GLP-1 launch speed, brand teams often need **segment- and geography-aware** hypotheses
+        faster than traditional surveys—while staying **anchored to observed prescribing** in administrative data.
+
+        **Cohort.** About 100 physicians (after filters) in **six priority metros**, **Endocrinology / Internal Medicine /
+        Family Medicine only**, with **Medicare Part D** data linked from **calendar year (CY) 2022** into **2023** so
+        we can attach **revealed** tirzepatide and GLP-1 patterns after the survey information set. Full scope
+        conditions are documented in `docs/target_report.md`.
+
+        **Persona and evaluation.** The default **`production`** persona combines **Medicare Part D** utilization
+        with **CMS Open Payments** through **CY2022** (no 2023 outcomes inside the prompt; no explicit 2022
+        tirzepatide yes/no field). The survey elicits **June-2022-forward** judgments. **Evaluation** compares those
+        answers to **pseudo-labels** inferred from **later Part D fields** in the cohort tab-separated values (TSV)
+        file— a hold-out style check at the cohort level. **Persona coherence** and **instrument health** are
+        **quality assurance (QA)** layers on top of that. The **revealed adoption** chart is **descriptive only** and
+        is **not** a causal estimate of promotional impact.
+        """
+    )
 
 
 def _render_sample_description(cohort_df: pd.DataFrame | None) -> None:
+    st.header("Sample description")
     st.markdown(
         """
         **Who is in the sample**
@@ -302,13 +402,218 @@ def _render_sample_description(cohort_df: pd.DataFrame | None) -> None:
         )
 
 
-def _distribution_from_summary_entry(dists: dict) -> dict[str, int]:
-    """Normalize new ``simulated_distributions`` and legacy ``method_comparison`` shapes."""
-    if "distribution" in dists:
-        raw = dists["distribution"]
-        return {str(k): int(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
-    ma = dists.get("method_a_distribution")
-    return {str(k): int(v) for k, v in ma.items()} if isinstance(ma, dict) else {}
+def _render_demo_bundle_banner(summary: dict) -> None:
+    """Offline seed vs placeholder notices and developer commands."""
+    if summary.get("offline_seed"):
+        st.info(
+            "You are viewing the **packaged offline demo**: responses were generated with a **fixed deterministic "
+            "seed** so the story is repeatable. **No live large language model (LLM) API calls** are made for this "
+            "bundle."
+        )
+        with st.expander("Developers: regenerate with a live model or refresh the demo bundle"):
+            st.markdown(
+                "Run the batch module with a provider API key, then rebuild metrics. Example command (copy into "
+                "your terminal from the project root):"
+            )
+            st.code("python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle", language="bash")
+            st.markdown(
+                "- Set **`TOGETHER_API_KEY`** for the default Together provider, **or**  \n"
+                "- Use **`--provider openai`** with **`OPENAI_API_KEY`** for OpenAI-compatible endpoints."
+            )
+    elif summary.get("is_placeholder"):
+        st.info(
+            "The demo bundle on disk is still a **placeholder** (no finalized survey output). Generate a real bundle "
+            "with a model API key, or use the offline seed flag if you only need a runnable pipeline."
+        )
+        with st.expander("Developers: commands to build a real or offline demo bundle"):
+            st.code("python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle", language="bash")
+            st.markdown(
+                "Use **`TOGETHER_API_KEY`** with the default provider, **`--provider openai`** with "
+                "**`OPENAI_API_KEY`**, or **`--offline-seed-demo`** for a deterministic run without an API."
+            )
+
+
+def _render_results_metrics_selector() -> dict:
+    """Results header, metrics file picker, and eval bundle coverage table."""
+    st.header("Results")
+    metrics_options = _discover_metrics_files()
+    if not metrics_options:
+        st.warning("No `metrics.json` found. Run `make eval` or `python -m eval.run_eval`.")
+        metrics: dict = {}
+    else:
+        labels = [x[0] for x in metrics_options]
+        default_ix = 0
+        for i, (_, p) in enumerate(metrics_options):
+            if p.resolve() == DEFAULT_METRICS_PATH.resolve():
+                default_ix = i
+                break
+        pick = st.selectbox(
+            "Choose eval snapshot",
+            range(len(labels)),
+            format_func=lambda i: labels[i],
+            index=default_ix,
+            help="Pick which `metrics.json` to render. Demo default is the bundled file; other folders are prior runs.",
+        )
+        _, metrics_path_used = metrics_options[pick]
+        metrics = _load_json(metrics_path_used)
+        rel = html.escape(str(metrics_path_used.relative_to(PROJECT_ROOT)))
+        _muted_md(
+            f"<strong>Loaded metrics file:</strong> <code>{rel}</code><br/>"
+            "<strong>Why this control exists.</strong> Choose which saved evaluation snapshot you are presenting—for "
+            "example, the checked-in demo versus a local smoke run."
+        )
+
+    _render_eval_coverage_sidebar(metrics)
+
+    if metrics.get("error"):
+        st.error(
+            f"**This metrics file is incomplete:** `{metrics.get('error')}`. "
+            "Run `python -m simulation.run_batch …` then `make eval` so charts below fill in."
+        )
+
+    return metrics
+
+
+def _render_eval_coverage_sidebar(metrics: dict) -> None:
+    """Confirm each eval bundle section is present (parity with eval.metrics.compute_metrics_bundle)."""
+    with st.expander("Eval bundle coverage (what this file contains)"):
+        _muted_md(
+            "Each row mirrors a block emitted by <code>compute_metrics_bundle</code> in <code>eval/metrics.py</code>."
+        )
+        rows = [
+            {
+                "Block": "survey_marginals",
+                "Present": bool(metrics.get("survey_marginals")),
+                "Role": "Per-item simulated answer histograms (method_a)",
+            },
+            {
+                "Block": "distribution_quality",
+                "Present": bool(metrics.get("distribution_quality")),
+                "Role": "JS/TV: simulated vs hold-out pseudo marginals",
+            },
+            {"Block": "persona_coherence", "Present": bool(metrics.get("persona_coherence")), "Role": "Cross-item rule violations"},
+            {"Block": "instrument_health", "Present": bool(metrics.get("instrument_health")), "Role": "Parse/coverage/latency QA"},
+            {
+                "Block": "behavioral_alignment",
+                "Present": bool(metrics.get("behavioral_alignment")),
+                "Role": "Per-NPI match vs hold-out pseudo-labels (needs cohort at eval time)",
+            },
+            {"Block": "run_manifest", "Present": bool(metrics.get("run_manifest")), "Role": "Pinned batch settings (if saved)"},
+            {"Block": "eval_meta", "Present": bool(metrics.get("eval_meta")), "Role": "Paths + options used when metrics were built"},
+        ]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+
+def _render_executive_snapshot(summary: dict, metrics: dict) -> None:
+    st.subheader("Executive snapshot")
+    _callout_md(
+        "<p><strong>What this row summarizes.</strong> Run size; average <strong>Jensen–Shannon</strong> shape gap "
+        "between simulated answers and Medicare-derived pseudo marginals; average <strong>exact match rate</strong> "
+        "to pseudo-labels built from later Part D fields; <strong>persona coherence</strong> violation rate; and "
+        "missing simulated answer cells from instrument health.</p>"
+        "<p><strong>Why it matters.</strong> A fast credibility check: are workshop outputs broadly compatible with "
+        "later administrative outcomes for the same cohort, and was the underlying run technically healthy?</p>"
+    )
+    dq = metrics.get("distribution_quality") if metrics else {}
+    ba = metrics.get("behavioral_alignment") if metrics else {}
+    pc = metrics.get("persona_coherence") if metrics else {}
+    ih = metrics.get("instrument_health") if metrics else {}
+
+    mjs = dq.get("mean_js_sim_vs_holdout") if isinstance(dq, dict) else None
+    m_acc = ba.get("mean_accuracy_over_labeled_questions") if isinstance(ba, dict) else None
+    vr = pc.get("violation_rate_per_method_block") if isinstance(pc, dict) else None
+    miss = ih.get("flat_cells_missing_option") if isinstance(ih, dict) else None
+
+    e1, e2, e3, e4, e5 = st.columns(5)
+    e1.metric("Doctors in demo summary", summary.get("n_npis", "—"))
+    e2.metric(
+        "Survey items in battery",
+        summary.get("n_questions", "—"),
+        help="Count of forward-looking survey items in the battery for this run.",
+    )
+    e3.metric(
+        "Mean Jensen–Shannon vs hold-out pseudo",
+        f"{mjs:.4f}" if mjs is not None else "—",
+        help="Mean Jensen–Shannon divergence between simulated distributions and hold-out pseudo marginals.",
+    )
+    e4.metric(
+        "Mean exact match vs claims-based hints",
+        f"{m_acc:.3f}" if m_acc is not None else "—",
+        help="Average per-item exact agreement between simulated answers and pseudo-labels from later Part D fields.",
+    )
+    e5.metric(
+        "Coherence violation rate",
+        f"{vr:.3f}" if vr is not None else "—",
+        help="Cross-item rule violations per simulated physician block (see Persona coherence section).",
+    )
+    if miss is not None:
+        st.metric(
+            "Missing answer cells (instrument health)",
+            int(miss),
+            help="Simulated answer cells without a chosen option—signals incomplete or failed parsing.",
+        )
+
+
+def _render_run_provenance_expanders(metrics: dict) -> None:
+    rm = metrics.get("run_manifest")
+    if isinstance(rm, dict) and rm:
+        with st.expander("Run configuration (pinned batch settings)"):
+            _muted_md(
+                "<strong>What this is.</strong> Exact command-line, model, and cohort choices used to produce the "
+                "bundle.<br/><strong>Why it matters.</strong> Attach to screenshots for reproducible internal review."
+            )
+            st.json(rm)
+
+    em = metrics.get("eval_meta")
+    if isinstance(em, dict) and em:
+        with st.expander("Eval build metadata"):
+            _muted_md(
+                "<strong>What this is.</strong> Paths and options used when <code>python -m eval.run_eval</code> "
+                "built this metrics file.<br/><strong>Why it matters.</strong> Confirms which response file and "
+                "cohort snapshot the numbers refer to."
+            )
+            st.json(em)
+
+
+def _render_revealed_adoption_chart(summary: dict, cohort_df: pd.DataFrame | None) -> None:
+    st.markdown("---")
+    actual = summary.get("adoption_by_archetype_actual") or _cohort_adoption_by_archetype(cohort_df)
+    if actual:
+        st.subheader("Revealed adoption by segment tag (Medicare Part D 2023)")
+        _callout_md(
+            "<p><strong>What this chart is.</strong> Among physicians in the cohort, the share with "
+            "<strong>any tirzepatide</strong> (brand example: Mounjaro) visible in <strong>Medicare Part D claims for "
+            "2023</strong>, broken out by <strong>adoption-style tags</strong> derived from 2022 prescribing.</p>"
+            "<p><strong>Why it matters.</strong> It is an <strong>empirical baseline</strong> you can compare to "
+            "simulated June-2022-forward posture. The comparison is <strong>descriptive and associational</strong>—"
+            "not evidence that messaging or sampling caused prescribing changes.</p>"
+        )
+        archetypes = list(actual.keys())
+        archetypes_pretty = [_pretty_archetype(a) for a in archetypes]
+        rates = [actual[a]["rate"] for a in archetypes]
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    x=archetypes_pretty,
+                    y=rates,
+                    marker_color="#2E5077",
+                    name="Actual (Part D 2023)",
+                )
+            ]
+        )
+        fig.update_layout(
+            title="Share with any tirzepatide claims (Part D 2023), by adoption-style tag",
+            yaxis_title="Share of doctors in segment",
+            xaxis_title="Adoption-style tag (from 2022 prescribing)",
+            template="plotly_white",
+            height=440,
+            margin=dict(l=60, r=40, t=70, b=120),
+            xaxis=dict(tickangle=-28, automargin=True),
+            yaxis=dict(automargin=True, range=[0, 1.05]),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No cohort or summary data for adoption-by-archetype chart.")
 
 
 def _render_simulated_distributions_from_summary(summary: dict) -> None:
@@ -377,15 +682,14 @@ def _render_distribution_quality_block(metrics: dict) -> None:
 
 
 def _render_behavioral_alignment_block(metrics: dict) -> None:
+    st.subheader("Hold-out alignment (June 2022 forward vs later Part D)")
     ba = metrics.get("behavioral_alignment")
     if not isinstance(ba, dict) or not ba.get("per_question"):
-        st.subheader("Hold-out alignment (June 2022 forward vs later Part D)")
         st.info(
             "This metrics file has no behavioral-alignment block. That usually means the cohort tab-separated file "
             "(`tirzepatide_simulation_cohort_100.tsv`) was missing when evaluation ran, or the bundle is a placeholder."
         )
         return
-    st.subheader("Hold-out alignment (June 2022 forward vs later Part D)")
     note = str(ba.get("note", "") or "").strip()
     rules_raw = str(ba.get("rules_version", "") or "").strip()
     rules_v = html.escape(rules_raw)
@@ -427,7 +731,6 @@ def _render_behavioral_alignment_block(metrics: dict) -> None:
         for qid, v in ba["per_question"].items():
             st.markdown(f"**{_question_short_title(qid)}** (`{qid}`)")
             c1, c2 = st.columns(2)
-            labels = _option_labels_for_question(qid)
             with c1:
                 st.markdown("*Simulated (method above)*")
                 st.json(v.get("pred_distribution") or {})
@@ -502,276 +805,7 @@ def _render_instrument_health_block(metrics: dict) -> None:
             st.write(sn)
 
 
-def _render_eval_coverage_sidebar(metrics: dict) -> None:
-    """Confirm each eval bundle section is present (parity with eval.metrics.compute_metrics_bundle)."""
-    with st.expander("Eval bundle coverage (what this file contains)"):
-        _muted_md(
-            "Each row mirrors a block emitted by <code>compute_metrics_bundle</code> in <code>eval/metrics.py</code>."
-        )
-        rows = [
-            {
-                "Block": "survey_marginals",
-                "Present": bool(metrics.get("survey_marginals")),
-                "Role": "Per-item simulated answer histograms (method_a)",
-            },
-            {
-                "Block": "distribution_quality",
-                "Present": bool(metrics.get("distribution_quality")),
-                "Role": "JS/TV: simulated vs hold-out pseudo marginals",
-            },
-            {"Block": "persona_coherence", "Present": bool(metrics.get("persona_coherence")), "Role": "Cross-item rule violations"},
-            {"Block": "instrument_health", "Present": bool(metrics.get("instrument_health")), "Role": "Parse/coverage/latency QA"},
-            {
-                "Block": "behavioral_alignment",
-                "Present": bool(metrics.get("behavioral_alignment")),
-                "Role": "Per-NPI match vs hold-out pseudo-labels (needs cohort at eval time)",
-            },
-            {"Block": "run_manifest", "Present": bool(metrics.get("run_manifest")), "Role": "Pinned batch settings (if saved)"},
-            {"Block": "eval_meta", "Present": bool(metrics.get("eval_meta")), "Role": "Paths + options used when metrics were built"},
-        ]
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-
-
-def main() -> None:
-    load_local_dotenv(override=False)
-    st.set_page_config(page_title="Tirzepatide Adoption Simulation", layout="wide")
-    _inject_page_styles()
-
-    with st.sidebar:
-        st.header("Optional live model smoke test")
-        st.caption(
-            "Runs only if you use **Advanced → Re-run with live API**. Settings apply to this browser session only "
-            "and are not saved."
-        )
-        smoke_provider = st.selectbox(
-            "LLM provider",
-            ["together", "openai"],
-            index=0,
-            help="together uses the native Together SDK; openai uses the OpenAI Python client (optional base URL).",
-        )
-        smoke_model = st.text_input(
-            "Model",
-            value=DEFAULT_TOGETHER_MODEL,
-            help="Together model id by default; use e.g. gpt-4o-mini with OpenAI provider.",
-        )
-        smoke_temp = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.2, step=0.05)
-        smoke_base_url = st.text_input(
-            "API base URL (optional)",
-            value="",
-            help="Only for OpenAI provider: e.g. https://api.together.xyz/v1 for OpenAI-compatible endpoints.",
-        )
-
-    summary = _load_json(SUMMARY_PATH)
-
-    st.title("Tirzepatide adoption simulation")
-    st.caption(
-        "Novo Nordisk-style six-week decision framing (June 2022) — Medicare Part D–scoped physician proof of "
-        "concept (POC)."
-    )
-
-    cohort_df = _read_cohort_tsv()
-
-    st.header("About")
-    st.markdown(
-        """
-        **Problem.** At GLP-1 launch speed, brand teams often need **segment- and geography-aware** hypotheses
-        faster than traditional surveys—while staying **anchored to observed prescribing** in administrative data.
-
-        **Cohort.** About 100 physicians (after filters) in **six priority metros**, **Endocrinology / Internal Medicine /
-        Family Medicine only**, with **Medicare Part D** data linked from **calendar year (CY) 2022** into **2023** so
-        we can attach **revealed** tirzepatide and GLP-1 patterns after the survey information set. Full scope
-        conditions are documented in `docs/target_report.md`.
-
-        **Persona and evaluation.** The default **`production`** persona combines **Medicare Part D** utilization
-        with **CMS Open Payments** through **CY2022** (no 2023 outcomes inside the prompt; no explicit 2022
-        tirzepatide yes/no field). The survey elicits **June-2022-forward** judgments. **Evaluation** compares those
-        answers to **pseudo-labels** inferred from **later Part D fields** in the cohort tab-separated values (TSV)
-        file— a hold-out style check at the cohort level. **Persona coherence** and **instrument health** are
-        **quality assurance (QA)** layers on top of that. The **revealed adoption** chart is **descriptive only** and
-        is **not** a causal estimate of promotional impact.
-        """
-    )
-
-    st.header("Sample description")
-    _render_sample_description(cohort_df)
-
-    if summary.get("offline_seed"):
-        st.info(
-            "You are viewing the **packaged offline demo**: responses were generated with a **fixed deterministic "
-            "seed** so the story is repeatable. **No live large language model (LLM) API calls** are made for this "
-            "bundle."
-        )
-        with st.expander("Developers: regenerate with a live model or refresh the demo bundle"):
-            st.markdown(
-                "Run the batch module with a provider API key, then rebuild metrics. Example command (copy into "
-                "your terminal from the project root):"
-            )
-            st.code("python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle", language="bash")
-            st.markdown(
-                "- Set **`TOGETHER_API_KEY`** for the default Together provider, **or**  \n"
-                "- Use **`--provider openai`** with **`OPENAI_API_KEY`** for OpenAI-compatible endpoints."
-            )
-    elif summary.get("is_placeholder"):
-        st.info(
-            "The demo bundle on disk is still a **placeholder** (no finalized survey output). Generate a real bundle "
-            "with a model API key, or use the offline seed flag if you only need a runnable pipeline."
-        )
-        with st.expander("Developers: commands to build a real or offline demo bundle"):
-            st.code("python -m simulation.run_batch --limit-npis 10 --save-as-demo-bundle", language="bash")
-            st.markdown(
-                "Use **`TOGETHER_API_KEY`** with the default provider, **`--provider openai`** with "
-                "**`OPENAI_API_KEY`**, or **`--offline-seed-demo`** for a deterministic run without an API."
-            )
-
-    st.header("Results")
-    metrics_options = _discover_metrics_files()
-    if not metrics_options:
-        st.warning("No `metrics.json` found. Run `make eval` or `python -m eval.run_eval`.")
-        metrics: dict = {}
-        metrics_path_used: Path | None = None
-    else:
-        labels = [x[0] for x in metrics_options]
-        default_ix = 0
-        for i, (_, p) in enumerate(metrics_options):
-            if p.resolve() == DEFAULT_METRICS_PATH.resolve():
-                default_ix = i
-                break
-        pick = st.selectbox(
-            "Choose eval snapshot",
-            range(len(labels)),
-            format_func=lambda i: labels[i],
-            index=default_ix,
-            help="Pick which `metrics.json` to render. Demo default is the bundled file; other folders are prior runs.",
-        )
-        _, metrics_path_used = metrics_options[pick]
-        metrics = _load_json(metrics_path_used)
-        rel = html.escape(str(metrics_path_used.relative_to(PROJECT_ROOT)))
-        _muted_md(
-            f"<strong>Loaded metrics file:</strong> <code>{rel}</code><br/>"
-            "<strong>Why this control exists.</strong> Choose which saved evaluation snapshot you are presenting—for "
-            "example, the checked-in demo versus a local smoke run."
-        )
-
-    _render_eval_coverage_sidebar(metrics)
-
-    if metrics.get("error"):
-        st.error(
-            f"**This metrics file is incomplete:** `{metrics.get('error')}`. "
-            "Run `python -m simulation.run_batch …` then `make eval` so charts below fill in."
-        )
-
-    st.subheader("Executive snapshot")
-    _callout_md(
-        "<p><strong>What this row summarizes.</strong> Run size; average <strong>Jensen–Shannon</strong> shape gap "
-        "between simulated answers and Medicare-derived pseudo marginals; average <strong>exact match rate</strong> "
-        "to pseudo-labels built from later Part D fields; <strong>persona coherence</strong> violation rate; and "
-        "missing simulated answer cells from instrument health.</p>"
-        "<p><strong>Why it matters.</strong> A fast credibility check: are workshop outputs broadly compatible with "
-        "later administrative outcomes for the same cohort, and was the underlying run technically healthy?</p>"
-    )
-    dq = metrics.get("distribution_quality") if metrics else {}
-    ba = metrics.get("behavioral_alignment") if metrics else {}
-    pc = metrics.get("persona_coherence") if metrics else {}
-    ih = metrics.get("instrument_health") if metrics else {}
-
-    mjs = dq.get("mean_js_sim_vs_holdout") if isinstance(dq, dict) else None
-    m_acc = ba.get("mean_accuracy_over_labeled_questions") if isinstance(ba, dict) else None
-    vr = pc.get("violation_rate_per_method_block") if isinstance(pc, dict) else None
-    miss = ih.get("flat_cells_missing_option") if isinstance(ih, dict) else None
-
-    e1, e2, e3, e4, e5 = st.columns(5)
-    e1.metric("Doctors in demo summary", summary.get("n_npis", "—"))
-    e2.metric(
-        "Survey items in battery",
-        summary.get("n_questions", "—"),
-        help="Count of forward-looking survey items in the battery for this run.",
-    )
-    e3.metric(
-        "Mean Jensen–Shannon vs hold-out pseudo",
-        f"{mjs:.4f}" if mjs is not None else "—",
-        help="Mean Jensen–Shannon divergence between simulated distributions and hold-out pseudo marginals.",
-    )
-    e4.metric(
-        "Mean exact match vs claims-based hints",
-        f"{m_acc:.3f}" if m_acc is not None else "—",
-        help="Average per-item exact agreement between simulated answers and pseudo-labels from later Part D fields.",
-    )
-    e5.metric(
-        "Coherence violation rate",
-        f"{vr:.3f}" if vr is not None else "—",
-        help="Cross-item rule violations per simulated physician block (see Persona coherence section).",
-    )
-    if miss is not None:
-        st.metric(
-            "Missing answer cells (instrument health)",
-            int(miss),
-            help="Simulated answer cells without a chosen option—signals incomplete or failed parsing.",
-        )
-
-    rm = metrics.get("run_manifest")
-    if isinstance(rm, dict) and rm:
-        with st.expander("Run configuration (pinned batch settings)"):
-            _muted_md(
-                "<strong>What this is.</strong> Exact command-line, model, and cohort choices used to produce the "
-                "bundle.<br/><strong>Why it matters.</strong> Attach to screenshots for reproducible internal review."
-            )
-            st.json(rm)
-
-    em = metrics.get("eval_meta")
-    if isinstance(em, dict) and em:
-        with st.expander("Eval build metadata"):
-            _muted_md(
-                "<strong>What this is.</strong> Paths and options used when <code>python -m eval.run_eval</code> "
-                "built this metrics file.<br/><strong>Why it matters.</strong> Confirms which response file and "
-                "cohort snapshot the numbers refer to."
-            )
-            st.json(em)
-
-    st.markdown("---")
-    actual = summary.get("adoption_by_archetype_actual") or _cohort_adoption_by_archetype(cohort_df)
-    if actual:
-        st.subheader("Revealed adoption by segment tag (Medicare Part D 2023)")
-        _callout_md(
-            "<p><strong>What this chart is.</strong> Among physicians in the cohort, the share with "
-            "<strong>any tirzepatide</strong> (brand example: Mounjaro) visible in <strong>Medicare Part D claims for "
-            "2023</strong>, broken out by <strong>adoption-style tags</strong> derived from 2022 prescribing.</p>"
-            "<p><strong>Why it matters.</strong> It is an <strong>empirical baseline</strong> you can compare to "
-            "simulated June-2022-forward posture. The comparison is <strong>descriptive and associational</strong>—"
-            "not evidence that messaging or sampling caused prescribing changes.</p>"
-        )
-        archetypes = list(actual.keys())
-        archetypes_pretty = [_pretty_archetype(a) for a in archetypes]
-        rates = [actual[a]["rate"] for a in archetypes]
-        fig = go.Figure(
-            data=[
-                go.Bar(
-                    x=archetypes_pretty,
-                    y=rates,
-                    marker_color="#2E5077",
-                    name="Actual (Part D 2023)",
-                )
-            ]
-        )
-        fig.update_layout(
-            title="Share with any tirzepatide claims (Part D 2023), by adoption-style tag",
-            yaxis_title="Share of doctors in segment",
-            xaxis_title="Adoption-style tag (from 2022 prescribing)",
-            template="plotly_white",
-            height=440,
-            margin=dict(l=60, r=40, t=70, b=120),
-            xaxis=dict(tickangle=-28, automargin=True),
-            yaxis=dict(automargin=True, range=[0, 1.05]),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("No cohort or summary data for adoption-by-archetype chart.")
-
-    _render_simulated_distributions_from_summary(summary)
-    _render_distribution_quality_block(metrics)
-    _render_behavioral_alignment_block(metrics)
-    _render_persona_coherence_block(metrics)
-    _render_instrument_health_block(metrics)
-
+def _render_reasoning_examples_section() -> None:
     st.header("Reasoning examples")
     _callout_md(
         "<p><strong>What this is.</strong> A handful of <strong>verbatim rationales</strong> excerpted from the "
@@ -794,6 +828,13 @@ def main() -> None:
                 st.code(r.get("parsed_option") or r.get("error") or "", language="text")
                 st.write(r.get("reasoning") or "(no rationale captured)")
 
+
+def _render_advanced_live_rerun(
+    smoke_provider: str,
+    smoke_model: str,
+    smoke_temp: float,
+    smoke_base_url: str,
+) -> None:
     st.header("Advanced")
     live = st.checkbox("Re-run with live API (session only; key not saved)")
     if live:
@@ -852,6 +893,8 @@ def main() -> None:
                 except Exception as exc:  # noqa: BLE001
                     st.error(str(exc))
 
+
+def _render_footer() -> None:
     st.divider()
     repo_hint = os.environ.get("DEMO_REPO_URL", "").strip()
     repo_line = (
@@ -869,6 +912,40 @@ def main() -> None:
         "<strong>Limitations.</strong> Medicare Part D only; annual files; purposive cohort—not a national "
         "probability sample."
     )
+
+
+# -----------------------------------------------------------------------------
+# Entry point
+# -----------------------------------------------------------------------------
+
+
+def main() -> None:
+    load_local_dotenv(override=False)
+    st.set_page_config(page_title="Tirzepatide Adoption Simulation", layout="wide")
+    _inject_page_styles()
+
+    smoke_provider, smoke_model, smoke_temp, smoke_base_url = _render_sidebar_smoke_settings()
+
+    summary = _load_json(SUMMARY_PATH)
+    cohort_df = _read_cohort_tsv()
+
+    _render_title_block()
+    _render_about_section()
+    _render_sample_description(cohort_df)
+    _render_demo_bundle_banner(summary)
+
+    metrics = _render_results_metrics_selector()
+    _render_executive_snapshot(summary, metrics)
+    _render_run_provenance_expanders(metrics)
+    _render_revealed_adoption_chart(summary, cohort_df)
+    _render_simulated_distributions_from_summary(summary)
+    _render_distribution_quality_block(metrics)
+    _render_behavioral_alignment_block(metrics)
+    _render_persona_coherence_block(metrics)
+    _render_instrument_health_block(metrics)
+    _render_reasoning_examples_section()
+    _render_advanced_live_rerun(smoke_provider, smoke_model, smoke_temp, smoke_base_url)
+    _render_footer()
 
 
 if __name__ == "__main__":
