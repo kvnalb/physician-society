@@ -3,7 +3,7 @@ VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 VENV_PIP := $(VENV_DIR)/bin/pip
 
-.PHONY: venv install setup legacy-run-select-org legacy-run-group-locations legacy-run-sample-pharma legacy-run-sample-pharma-dry run-tirzepatide-cohort run-tirzepatide-cohort-dry demo eval smoke-batch report-html docker-build docker-run clean-venv
+.PHONY: venv install setup legacy-run-select-org legacy-run-group-locations legacy-run-sample-pharma legacy-run-sample-pharma-dry run-tirzepatide-cohort run-tirzepatide-cohort-dry demo eval refresh-demo smoke-batch report-html docker-build docker-run clean-venv
 
 venv:
 	$(PYTHON) -m venv $(VENV_DIR)
@@ -40,6 +40,10 @@ eval:
 	$(VENV_PYTHON) -m eval.run_eval \
 		--responses-file data/output/runs/latest/responses.jsonl \
 		--output artifacts/demo/metrics.json
+
+# Rebuild artifacts/demo/summary.json, sample_responses.jsonl, and metrics.json from an existing JSONL (no API).
+refresh-demo:
+	$(VENV_PYTHON) -m simulation.refresh_demo_from_responses
 
 report-html:
 	$(VENV_PYTHON) docs/build_report.py

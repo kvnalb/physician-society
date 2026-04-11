@@ -238,8 +238,9 @@
     "shuffle_seed": null
   },
   "eval_meta": {
-    "responses_file": "/Users/kunalb/Desktop/physician-society/data/output/runs/latest/responses__zai-org_GLM-5.1.jsonl",
+    "responses_file": "data/output/runs/latest/responses__zai-org_GLM-5.1.jsonl",
     "cohort_path": "data/output/tirzepatide_simulation_cohort_100.tsv",
-    "questions_yaml": null
+    "questions_yaml": "simulation/questions.yaml",
+    "refreshed_via": "simulation.refresh_demo_from_responses"
   }
 }
