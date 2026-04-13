@@ -1018,7 +1018,7 @@ def _render_platform_positioning() -> None:
         """
         Current simulation quality reflects a proof-of-concept built on a single year of
         prescribing data, a general-purpose LLM, and no inter-persona dynamics. Four concrete
-        improvements — several already in progress — target the main sources of error:
+        improvements target the main sources of error:
         """
     )
 
@@ -1062,15 +1062,11 @@ def _render_platform_positioning() -> None:
             "peers' positions, how do you respond?'",
         },
         {
-            "Improvement": "Frontier reasoning models",
+            "Improvement": "Frontier models",
             "Status": "Planned",
-            "Expected impact": "Current results use a general-purpose model. Frontier reasoning "
-            "models (e.g., Claude with extended thinking, o3) that explicitly reason through "
-            "clinical tradeoffs before committing to an answer may improve both accuracy on "
-            "nuanced questions and the clinical plausibility of qualitative rationales.",
-            "What changes in the prompt": "Extended thinking / chain-of-thought: 'Before "
-            "answering, reason through the clinical evidence, your practice constraints, and "
-            "your patient population.'",
+            "Expected impact": "The current version of the demo uses a top-tier open-source LLM(GLM 5.1) "
+            "but we might achieve better results with a frontier model like Claude Opus 4.6 or GPT 5.4 Pro."
+            "This hypothesis is still to be tested.",
         },
     ]
 
