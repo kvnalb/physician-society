@@ -1,0 +1,214 @@
+{
+  "survey": {
+    "method_agreement_kappa_mean": -0.29431070547677535,
+    "per_question": {
+      "q1_second_line_agent": {
+        "n_paired": 100,
+        "method_a_dist": {
+          "q1_insulin": 14,
+          "q1_dpp4": 17,
+          "q1_sglt2": 17,
+          "q1_glp1": 15,
+          "q1_other": 22,
+          "q1_su": 15
+        },
+        "method_b_dist": {
+          "q1_other": 14,
+          "q1_su": 17,
+          "q1_dpp4": 17,
+          "q1_sglt2": 15,
+          "q1_glp1": 22,
+          "q1_insulin": 15
+        },
+        "cohen_kappa": -0.1971746677840298
+      },
+      "q2_glp1_panel_share": {
+        "n_paired": 100,
+        "method_a_dist": {
+          "q2_30_50": 18,
+          "q2_lt5": 21,
+          "q2_5_15": 18,
+          "q2_50p": 24,
+          "q2_15_30": 19
+        },
+        "method_b_dist": {
+          "q2_50p": 18,
+          "q2_5_15": 21,
+          "q2_15_30": 18,
+          "q2_lt5": 24,
+          "q2_30_50": 19
+        },
+        "cohen_kappa": -0.24968757810547348
+      },
+      "q3_tirzepatide_prescribed": {
+        "n_paired": 100,
+        "method_a_dist": {
+          "q3_yes": 33,
+          "q3_no_not_yet": 21,
+          "q3_no_unlikely": 21,
+          "q3_unsure": 25
+        },
+        "method_b_dist": {
+          "q3_no_not_yet": 33,
+          "q3_no_unlikely": 21,
+          "q3_unsure": 21,
+          "q3_yes": 25
+        },
+        "cohen_kappa": -0.33049494411921243
+      },
+      "q4_tirzepatide_adoption_speed": {
+        "n_paired": 100,
+        "method_a_dist": {
+          "q4_early": 24,
+          "q4_mainstream": 31,
+          "q4_late": 22,
+          "q4_na": 23
+        },
+        "method_b_dist": {
+          "q4_mainstream": 24,
+          "q4_late": 31,
+          "q4_na": 22,
+          "q4_early": 23
+        },
+        "cohen_kappa": -0.33049494411921243
+      },
+      "q5_branded_vs_generic": {
+        "n_paired": 100,
+        "method_a_dist": {
+          "q5_no_pref": 29,
+          "q5_prefer_generic": 24,
+          "q5_case_by_case": 19,
+          "q5_prefer_branded": 28
+        },
+        "method_b_dist": {
+          "q5_case_by_case": 29,
+          "q5_no_pref": 24,
+          "q5_prefer_branded": 19,
+          "q5_prefer_generic": 28
+        },
+        "cohen_kappa": -0.32467876539939056
+      },
+      "q6_diabetes_drug_count": {
+        "n_paired": 100,
+        "method_a_dist": {
+          "q6_1_5": 30,
+          "q6_11_20": 20,
+          "q6_20p": 22,
+          "q6_6_10": 28
+        },
+        "method_b_dist": {
+          "q6_6_10": 30,
+          "q6_20p": 20,
+          "q6_1_5": 22,
+          "q6_11_20": 28
+        },
+        "cohen_kappa": -0.33333333333333326
+      }
+    },
+    "stability": "Methods A and B show weak agreement (low Cohen's kappa on average)."
+  },
+  "behavioral_alignment": {
+    "rules_version": "1",
+    "method_for_alignment": "method_a",
+    "mean_accuracy_over_labeled_questions": 0.24,
+    "per_question": {
+      "q1_second_line_agent": {
+        "n_labeled": 0,
+        "accuracy": null,
+        "js_divergence_marginal": null,
+        "tv_distance_marginal": null,
+        "pred_distribution": {},
+        "pseudo_label_distribution": {}
+      },
+      "q2_glp1_panel_share": {
+        "n_labeled": 100,
+        "accuracy": 0.22,
+        "js_divergence_marginal": 0.019960312411918125,
+        "tv_distance_marginal": 0.18000000000000002,
+        "pred_distribution": {
+          "q2_30_50": 18,
+          "q2_lt5": 21,
+          "q2_5_15": 18,
+          "q2_50p": 24,
+          "q2_15_30": 19
+        },
+        "pseudo_label_distribution": {
+          "q2_5_15": 32,
+          "q2_30_50": 22,
+          "q2_lt5": 12,
+          "q2_15_30": 14,
+          "q2_50p": 20
+        }
+      },
+      "q3_tirzepatide_prescribed": {
+        "n_labeled": 100,
+        "accuracy": 0.23,
+        "js_divergence_marginal": 0.2631598931928003,
+        "tv_distance_marginal": 0.6000000000000001,
+        "pred_distribution": {
+          "q3_yes": 33,
+          "q3_no_not_yet": 21,
+          "q3_no_unlikely": 21,
+          "q3_unsure": 25
+        },
+        "pseudo_label_distribution": {
+          "q3_no_unlikely": 81,
+          "q3_yes": 19
+        }
+      },
+      "q4_tirzepatide_adoption_speed": {
+        "n_labeled": 100,
+        "accuracy": 0.2,
+        "js_divergence_marginal": 0.2157656314912797,
+        "tv_distance_marginal": 0.5800000000000001,
+        "pred_distribution": {
+          "q4_early": 24,
+          "q4_mainstream": 31,
+          "q4_late": 22,
+          "q4_na": 23
+        },
+        "pseudo_label_distribution": {
+          "q4_na": 81,
+          "q4_mainstream": 15,
+          "q4_early": 4
+        }
+      },
+      "q5_branded_vs_generic": {
+        "n_labeled": 100,
+        "accuracy": 0.22,
+        "js_divergence_marginal": 0.09280792076478452,
+        "tv_distance_marginal": 0.31,
+        "pred_distribution": {
+          "q5_no_pref": 29,
+          "q5_prefer_generic": 24,
+          "q5_case_by_case": 19,
+          "q5_prefer_branded": 28
+        },
+        "pseudo_label_distribution": {
+          "q5_prefer_generic": 12,
+          "q5_no_pref": 46,
+          "q5_prefer_branded": 42
+        }
+      },
+      "q6_diabetes_drug_count": {
+        "n_labeled": 100,
+        "accuracy": 0.33,
+        "js_divergence_marginal": 0.05506410668385789,
+        "tv_distance_marginal": 0.2,
+        "pred_distribution": {
+          "q6_1_5": 30,
+          "q6_11_20": 20,
+          "q6_20p": 22,
+          "q6_6_10": 28
+        },
+        "pseudo_label_distribution": {
+          "q6_1_5": 39,
+          "q6_6_10": 37,
+          "q6_11_20": 22,
+          "q6_20p": 2
+        }
+      }
+    },
+    "note": "Pseudo-labels are claims-derived heuristics, not human survey responses."
+  }
+}

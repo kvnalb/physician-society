@@ -296,8 +296,8 @@ def _render_about_section() -> None:
         we evaluate answers against what actually happened in the physician's Part D 2023 claims,
         which the model never sees.
 
-        **Why this matters commercially.** Pharma brand teams currently spend $200–500K per physician
-        survey and $15–25K per physician per day for advisory boards. A validated simulation lets
+        **Why this matters commercially.** Pharma brand teams currently spend USD 200–500K per physician
+        survey and USD 15–25K per physician per day for advisory boards. A validated simulation lets
         them pre-test messaging, explore sensitive hypotheticals, and iterate on launch strategy at
         a fraction of the cost — with responses grounded in each physician's real practice, not
         demographic stereotypes.
