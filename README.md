@@ -1,3 +1,5 @@
+**Note: Old streamlit link has been deprecated: click on new link in the sidebar.**
+
 # Physician Society
 
 Research-oriented **physician persona simulation** for a Medicare Part D–scoped cohort: synthetic survey responses from a structured LLM persona (2022-only administrative context in the prompt), **forward-looking** items framed as **mid-2022** (including tirzepatide / Mounjaro launch context), and **evaluation** against hold-out-style signals derived from later Part D fields in the cohort file. A **Streamlit** app presents the story using a small checked-in demo bundle; the full methodology narrative lives in [`docs/target_report.md`](docs/target_report.md).
